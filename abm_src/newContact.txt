@@ -1,0 +1,6 @@
+function (r6) 
+{
+    .Call(`_ABM_newContact`, r6)
+}
+<bytecode: 0x000001f74ad501f8>
+<environment: namespace:ABM>

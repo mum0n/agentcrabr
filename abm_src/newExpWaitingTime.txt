@@ -1,0 +1,6 @@
+function (rate) 
+{
+    .Call(`_ABM_newExpWaitingTime`, rate)
+}
+<bytecode: 0x000001f74adaedd0>
+<environment: namespace:ABM>

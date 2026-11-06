@@ -1,0 +1,6 @@
+function (rng) 
+{
+    .Call(`_ABM_newConfigurationModel`, rng)
+}
+<bytecode: 0x000001f74ad5fe78>
+<environment: namespace:ABM>

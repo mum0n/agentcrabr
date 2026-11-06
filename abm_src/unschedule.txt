@@ -1,0 +1,6 @@
+function (agent, event) 
+{
+    invisible(.Call(`_ABM_unschedule`, agent, event))
+}
+<bytecode: 0x000001f74a4231f8>
+<environment: namespace:ABM>

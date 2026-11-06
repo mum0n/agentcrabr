@@ -1,0 +1,9 @@
+function (sim, from, contact_from, to, contact_to, contact, waiting_time, 
+    to_change_callback = NULL, changed_callback = NULL) 
+{
+    invisible(.Call(`_ABM_addTransition`, sim, from, contact_from, 
+        to, contact_to, contact, waiting_time, to_change_callback, 
+        changed_callback))
+}
+<bytecode: 0x000001f74a2647e0>
+<environment: namespace:ABM>

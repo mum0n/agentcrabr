@@ -1,0 +1,6 @@
+function (name, agent, state) 
+{
+    .Call(`_ABM_newStateLogger`, name, agent, state)
+}
+<bytecode: 0x000001f74ae4bd98>
+<environment: namespace:ABM>

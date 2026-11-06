@@ -1,0 +1,6 @@
+function (agent, rule) 
+{
+    stateMatch(getState(agent), rule)
+}
+<bytecode: 0x000001f74ad217a8>
+<environment: namespace:ABM>

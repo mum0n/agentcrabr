@@ -1,0 +1,6 @@
+function (shape, scale) 
+{
+    .Call(`_ABM_newGammaWaitingTime`, shape, scale)
+}
+<bytecode: 0x000001f74ae3b3b8>
+<environment: namespace:ABM>

@@ -1,0 +1,19 @@
+<R6Contact> object generator
+  Public:
+    initialize: function () 
+    attach: function (population) 
+    contact: function (time, agent) 
+    addAgent: function (agent) 
+    remove: function (agent) 
+    build: function () 
+    clone: function (deep = FALSE) 
+  Active bindings:
+    get: function () 
+    attached: function () 
+  Private:
+    pointer: NULL
+    population: NULL
+  Parent env: <environment: namespace:ABM>
+  Locked objects: TRUE
+  Locked class: FALSE
+  Portable: TRUE

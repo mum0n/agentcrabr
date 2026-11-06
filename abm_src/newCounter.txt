@@ -1,0 +1,6 @@
+function (name, from, to = NULL, initial = 0L) 
+{
+    .Call(`_ABM_newCounter`, name, from, to, initial)
+}
+<bytecode: 0x000001f74ada78f8>
+<environment: namespace:ABM>

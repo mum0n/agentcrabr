@@ -1,0 +1,6 @@
+function (population, contact) 
+{
+    invisible(.Call(`_ABM_addContact`, population, contact))
+}
+<bytecode: 0x000001f74a2604d0>
+<environment: namespace:ABM>

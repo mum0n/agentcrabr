@@ -1,0 +1,6 @@
+function (state, rule) 
+{
+    .Call(`_ABM_stateMatch`, state, rule)
+}
+<bytecode: 0x000001f74af8e548>
+<environment: namespace:ABM>

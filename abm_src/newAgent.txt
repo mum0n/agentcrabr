@@ -1,0 +1,6 @@
+function (state, death_time = NA_real_) 
+{
+    .Call(`_ABM_newAgent`, state, death_time)
+}
+<bytecode: 0x000001f74ad36af8>
+<environment: namespace:ABM>

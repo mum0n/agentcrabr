@@ -1,0 +1,6 @@
+function (population, states) 
+{
+    invisible(.Call(`_ABM_setStates`, population, states))
+}
+<bytecode: 0x000001f7489af2d8>
+<environment: namespace:ABM>

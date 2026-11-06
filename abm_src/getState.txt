@@ -1,0 +1,6 @@
+function (agent) 
+{
+    .Call(`_ABM_getState`, agent)
+}
+<bytecode: 0x000001f74ac3dbd0>
+<environment: namespace:ABM>

@@ -1,0 +1,6 @@
+function (agent) 
+{
+    invisible(.Call(`_ABM_clearEvents`, agent))
+}
+<bytecode: 0x000001f74a473778>
+<environment: namespace:ABM>

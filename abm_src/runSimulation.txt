@@ -1,0 +1,6 @@
+function (sim, time) 
+{
+    .Call(`_ABM_runSimulation`, sim, time)
+}
+<bytecode: 0x000001f74b18c938>
+<environment: namespace:ABM>

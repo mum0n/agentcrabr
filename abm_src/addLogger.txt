@@ -1,0 +1,6 @@
+function (sim, logger) 
+{
+    invisible(.Call(`_ABM_addLogger`, sim, logger))
+}
+<bytecode: 0x000001f74a2808c0>
+<environment: namespace:ABM>

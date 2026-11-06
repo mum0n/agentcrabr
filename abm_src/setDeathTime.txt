@@ -1,0 +1,6 @@
+function (agent, time) 
+{
+    invisible(.Call(`_ABM_setDeathTime`, agent, time))
+}
+<bytecode: 0x000001f74b2a04d8>
+<environment: namespace:ABM>

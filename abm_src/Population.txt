@@ -1,0 +1,17 @@
+<R6Population> object generator
+  Inherits from: <Agent>
+  Public:
+    initialize: function (population = 0, initializer = NULL) 
+    addAgent: function (agent) 
+    removeAgent: function (agent) 
+    addContact: function (contact) 
+    agent: function (i) 
+    setState: function (i, state) 
+    setStates: function (states) 
+    clone: function (deep = FALSE) 
+  Active bindings:
+    size: function () 
+  Parent env: <environment: namespace:ABM>
+  Locked objects: TRUE
+  Locked class: FALSE
+  Portable: TRUE

@@ -1,0 +1,13 @@
+<R6Event> object generator
+  Public:
+    initialize: function (time, handler) 
+    clone: function (deep = FALSE) 
+  Active bindings:
+    time: function () 
+    get: function () 
+  Private:
+    event: NULL
+  Parent env: <environment: namespace:ABM>
+  Locked objects: TRUE
+  Locked class: FALSE
+  Portable: TRUE

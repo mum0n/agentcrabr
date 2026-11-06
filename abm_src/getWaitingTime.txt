@@ -1,0 +1,6 @@
+function (generator, time) 
+{
+    .Call(`_ABM_getWaitingTime`, generator, time)
+}
+<bytecode: 0x000001f74ac0a158>
+<environment: namespace:ABM>

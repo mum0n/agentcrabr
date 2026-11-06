@@ -1,0 +1,19 @@
+<R6Agent> object generator
+  Public:
+    initialize: function (agent = NULL, death.time = NA) 
+    match: function (rule) 
+    schedule: function (event) 
+    unschedule: function (event) 
+    leave: function () 
+    setDeathTime: function (time) 
+    clone: function (deep = FALSE) 
+  Active bindings:
+    state: function (new.state = NULL) 
+    id: function () 
+    get: function () 
+  Private:
+    agent: NULL
+  Parent env: <environment: namespace:ABM>
+  Locked objects: TRUE
+  Locked class: FALSE
+  Portable: TRUE

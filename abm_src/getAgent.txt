@@ -1,0 +1,6 @@
+function (population, i) 
+{
+    .Call(`_ABM_getAgent`, population, i)
+}
+<bytecode: 0x000001f74abc06d0>
+<environment: namespace:ABM>

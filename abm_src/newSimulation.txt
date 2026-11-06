@@ -1,0 +1,6 @@
+function (n, initializer = NULL) 
+{
+    .Call(`_ABM_newSimulation`, n, initializer)
+}
+<bytecode: 0x000001f74ae767a8>
+<environment: namespace:ABM>

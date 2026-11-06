@@ -1,0 +1,6 @@
+function (population, agent) 
+{
+    invisible(.Call(`_ABM_addAgent`, population, agent))
+}
+<bytecode: 0x000001f74a23a938>
+<environment: namespace:ABM>

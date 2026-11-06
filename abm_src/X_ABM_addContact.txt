@@ -1,0 +1,19 @@
+$name
+[1] "_ABM_addContact"
+
+$address
+<pointer: 0x000001f74a0d6500>
+attr(,"class")
+[1] "RegisteredNativeSymbol"
+
+$dll
+DLL name: ABM
+Filename:
+        C:/Users/Nathalie/AppData/Local/R/win-library/4.6/ABM/libs/x64/ABM.dll
+Dynamic lookup: FALSE
+
+$numParameters
+[1] 2
+
+attr(,"class")
+[1] "CallRoutine"      "NativeSymbolInfo"

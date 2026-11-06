@@ -1,0 +1,6 @@
+function (event) 
+{
+    .Call(`_ABM_getTime`, event)
+}
+<bytecode: 0x000001f74ac30430>
+<environment: namespace:ABM>

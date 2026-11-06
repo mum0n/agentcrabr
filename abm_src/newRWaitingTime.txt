@@ -1,0 +1,6 @@
+function (rng) 
+{
+    .Call(`_ABM_newRWaitingTime`, rng)
+}
+<bytecode: 0x000001f74ae49078>
+<environment: namespace:ABM>

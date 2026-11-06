@@ -1,0 +1,6 @@
+function (agent, value) 
+{
+    invisible(.Call(`_ABM_setState`, agent, value))
+}
+<bytecode: 0x000001f74b337348>
+<environment: namespace:ABM>

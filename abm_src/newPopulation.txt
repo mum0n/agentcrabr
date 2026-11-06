@@ -1,0 +1,6 @@
+function (n, initializer = NULL) 
+{
+    .Call(`_ABM_newPopulation`, n, initializer)
+}
+<bytecode: 0x000001f74ae18d98>
+<environment: namespace:ABM>

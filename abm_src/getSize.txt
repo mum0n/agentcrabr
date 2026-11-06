@@ -1,0 +1,6 @@
+function (population) 
+{
+    .Call(`_ABM_getSize`, population)
+}
+<bytecode: 0x000001f74abaf9d8>
+<environment: namespace:ABM>

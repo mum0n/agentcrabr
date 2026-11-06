@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>agentcrabr - Crab Agent-Based Model Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; color: #1e293b; }
+    .header { background: #0f172a; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header span { font-size: 12px; color: #94a3b8; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+    .panel { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+    .panel h2 { font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+    .input-group { margin-bottom: 10px; }
+    .input-group label { display: block; font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 3px; }
+    .input-group input { width: 100%; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; font-family: monospace; }
+    .input-group input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+    .btn { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; }
+    .btn:hover { background: #2563eb; }
+    .btn:disabled { background: #94a3b8; cursor: not-allowed; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    .kpi { background: #f8fafc; border-radius: 6px; padding: 12px; text-align: center; }
+    .kpi .value { font-size: 24px; font-weight: 700; color: #0f172a; }
+    .kpi .label { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .chart-container { position: relative; height: 300px; margin-bottom: 16px; }
+    .map-container { height: 250px; border-radius: 6px; overflow: hidden; border: 1px solid #cbd5e1; margin-bottom: 12px; }
+    .coord-display { font-family: monospace; font-size: 12px; background: #e2e8f0; padding: 4px 8px; border-radius: 4px; text-align: center; margin-bottom: 12px; }
+    .env-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .env-table th, .env-table td { padding: 6px 8px; border: 1px solid #e2e8f0; text-align: left; }
+    .env-table th { background: #f1f5f9; font-weight: 600; }
+    .status { font-size: 12px; padding: 8px; border-radius: 4px; margin-bottom: 12px; }
+    .status.running { background: #fef3c7; color: #92400e; }
+    .status.done { background: #d1fae5; color: #065f46; }
+    .status.error { background: #fee2e2; color: #991b1b; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>agentcrabr</h1>
+    <span>Crab Agent-Based Model Dashboard | TethysBio-style</span>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <!-- Left sidebar: Inputs -->
+      <div>
+        <!-- Location Map -->
+        <div class="panel">
+          <h2>Location Selection</h2>
+          <div class="coord-display" id="coord_display">Selected: 44.50°N, -63.50°W</div>
+          <div class="map-container" id="map"></div>
+          <div class="two-col">
+            <div class="input-group">
+              <label>Longitude (°W)</label>
+              <input type="number" id="inp_lon" value="-63.50" step="0.01" min="-66.5" max="-57.5">
+            </div>
+            <div class="input-group">
+              <label>Latitude (°N)</label>
+              <input type="number" id="inp_lat" value="44.50" step="0.01" min="42.0" max="48.5">
+            </div>
+          </div>
+        </div>
+
+        <!-- Environmental Data -->
+        <div class="panel">
+          <h2>Environmental Data (from Location)</h2>
+          <table class="env-table">
+            <tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>
+            <tr><td>Bottom Temperature</td><td id="env_temp">--</td><td>°C</td></tr>
+            <tr><td>Depth</td><td id="env_depth">--</td><td>m</td></tr>
+            <tr><td>Food Availability</td><td id="env_food">--</td><td>index</td></tr>
+            <tr><td>Habitat Quality (HSI)</td><td id="env_hsi">--</td><td>0-1</td></tr>
+          </table>
+        </div>
+
+        <!-- Model Parameters -->
+        <div class="panel">
+          <h2>Model Parameters</h2>
+          <div class="input-group">
+            <label>Number of Crabs</label>
+            <input type="number" id="inp_n_crabs" value="50" min="1" max="500" step="1">
+          </div>
+          <div class="input-group">
+            <label>Simulation Time (days)</label>
+            <input type="number" id="inp_sim_time" value="50" min="1" max="365" step="1">
+          </div>
+          <div class="input-group">
+            <label>Initial Energy</label>
+            <input type="number" id="inp_energy_init" value="10" min="0" max="100" step="0.1">
+          </div>
+          <div class="input-group">
+            <label>Energy Max</label>
+            <input type="number" id="inp_energy_max" value="20" min="1" max="100" step="0.1">
+          </div>
+          <div class="input-group">
+            <label>Foraging Gain</label>
+            <input type="number" id="inp_foraging_gain" value="0.3" min="0" max="10" step="0.01">
+          </div>
+          <div class="input-group">
+            <label>Resting Cost</label>
+            <input type="number" id="inp_resting_cost" value="0.05" min="0" max="10" step="0.01">
+          </div>
+          <div class="input-group">
+            <label>Molting Cost</label>
+            <input type="number" id="inp_molting_cost" value="3" min="0" max="20" step="0.1">
+          </div>
+          <div class="input-group">
+            <label>Molt Growth</label>
+            <input type="number" id="inp_molt_growth" value="0.1" min="0" max="1" step="0.01">
+          </div>
+          <div class="input-group">
+            <label>Foraging Rate</label>
+            <input type="number" id="inp_foraging_rate" value="0.5" min="0.01" max="10" step="0.01">
+          </div>
+          <div class="input-group">
+            <label>Resting Rate</label>
+            <input type="number" id="inp_resting_rate" value="0.3" min="0.01" max="10" step="0.01">
+          </div>
+          <div class="input-group">
+            <label>Molting Rate</label>
+            <input type="number" id="inp_molting_rate" value="0.05" min="0.001" max="10" step="0.001">
+          </div>
+          <div class="input-group">
+            <label>Mortality Rate</label>
+            <input type="number" id="inp_mortality_rate" value="0.02" min="0.001" max="1" step="0.001">
+          </div>
+          <div class="input-group">
+            <label>Size Init Min</label>
+            <input type="number" id="inp_size_min" value="0.5" min="0" max="10" step="0.1">
+          </div>
+          <div class="input-group">
+            <label>Size Init Max</label>
+            <input type="number" id="inp_size_max" value="1.5" min="0" max="10" step="0.1">
+          </div>
+          <button class="btn" id="run_btn" onclick="runSimulation()">Run Simulation</button>
+        </div>
+      </div>
+
+      <!-- Right: Outputs -->
+      <div>
+        <div id="status" class="status" style="display:none;"></div>
+
+        <!-- KPIs -->
+        <div class="kpi-grid">
+          <div class="kpi"><div class="value" id="kpi_total">--</div><div class="label">Total Crabs</div></div>
+          <div class="kpi"><div class="value" id="kpi_foraging">--</div><div class="label">Foraging</div></div>
+          <div class="kpi"><div class="value" id="kpi_dead">--</div><div class="label">Dead</div></div>
+          <div class="kpi"><div class="value" id="kpi_mean_size">--</div><div class="label">Mean Size</div></div>
+        </div>
+
+        <!-- Population Dynamics -->
+        <div class="panel">
+          <h2>Population Dynamics</h2>
+          <div class="chart-container"><canvas id="popChart"></canvas></div>
+        </div>
+
+        <!-- Two-column: State Distribution + Size Distribution -->
+        <div class="two-col">
+          <div class="panel">
+            <h2>State Distribution (Final)</h2>
+            <div class="chart-container"><canvas id="stateChart"></canvas></div>
+          </div>
+          <div class="panel">
+            <h2>Size Distribution by Sex</h2>
+            <div class="chart-container"><canvas id="sizeChart"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Stage Distribution -->
+        <div class="panel">
+          <h2>Stage / Size Class Distribution</h2>
+          <div class="chart-container"><canvas id="stageChart"></canvas></div>
+        </div>
+
+        <!-- Environmental Distributions -->
+        <div class="panel">
+          <h2>Environmental Driver Distributions</h2>
+          <div class="chart-container"><canvas id="envChart"></canvas></div>
+        </div>
+
+        <!-- Spatial Map -->
+        <div class="panel">
+          <h2>Spatial Distribution of Crabs</h2>
+          <div class="chart-container"><canvas id="spatialChart"></canvas></div>
+        </div>
+
+        <!-- Raw Data Table -->
+        <div class="panel">
+          <h2>Simulation Output Data</h2>
+          <div style="max-height: 300px; overflow-y: auto;">
+            <table class="env-table" id="dataTable">
+              <thead><tr><th>Time</th><th>Foraging</th><th>Resting</th><th>Molting</th><th>Dead</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // === Leaflet Map ===
+  let map = L.map('map').setView([44.5, -63.5], 6);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Esri Ocean Basemap',
+    maxZoom: 12
+  }).addTo(map);
+
+  let marker = L.marker([44.5, -63.5], {draggable: true}).addTo(map);
+
+  function updateCoords(lat, lon) {
+    document.getElementById('inp_lat').value = lat.toFixed(2);
+    document.getElementById('inp_lon').value = lon.toFixed(2);
+    document.getElementById('coord_display').innerText = 'Selected: ' + lat.toFixed(2) + '°N, ' + Math.abs(lon).toFixed(2) + '°W';
+    updateEnvData(lat, lon);
+  }
+
+  marker.on('dragend', function(e) {
+    let pos = e.target.getLatLng();
+    updateCoords(pos.lat, pos.lng);
+  });
+
+  map.on('click', function(e) {
+    marker.setLatLng(e.latlng);
+    updateCoords(e.latlng.lat, e.latlng.lng);
+  });
+
+  document.getElementById('inp_lat').addEventListener('change', function() {
+    let lat = parseFloat(this.value);
+    let lon = parseFloat(document.getElementById('inp_lon').value);
+    marker.setLatLng([lat, lon]);
+    map.setView([lat, lon], map.getZoom());
+    updateCoords(lat, lon);
+  });
+
+  document.getElementById('inp_lon').addEventListener('change', function() {
+    let lon = parseFloat(this.value);
+    let lat = parseFloat(document.getElementById('inp_lat').value);
+    marker.setLatLng([lat, lon]);
+    map.setView([lat, lon], map.getZoom());
+    updateCoords(lat, lon);
+  });
+
+  // === Environmental Data Lookup (simulated based on location) ===
+  function updateEnvData(lat, lon) {
+    // Simulate environmental data based on coordinates
+    // In production, this would fetch from Tethys or other data sources
+    let temp = 8 + (lat - 42) * 0.5 + Math.sin(lon + 63) * 2;
+    let depth = 50 + Math.abs(lat - 44) * 30 + Math.abs(lon + 63) * 10;
+    let food = 0.3 + Math.cos(lat * 0.5) * 0.2 + Math.sin(lon) * 0.1;
+    food = Math.max(0, Math.min(1, food));
+    let hsi = 0.5 + (temp - 5) * 0.05 - depth * 0.001;
+    hsi = Math.max(0, Math.min(1, hsi));
+
+    document.getElementById('env_temp').innerText = temp.toFixed(1);
+    document.getElementById('env_depth').innerText = depth.toFixed(0);
+    document.getElementById('env_food').innerText = food.toFixed(2);
+    document.getElementById('env_hsi').innerText = hsi.toFixed(2);
+  }
+
+  // Initial env data
+  updateEnvData(44.5, -63.5);
+
+  // === Simulation (JavaScript-based ABM) ===
+  function runSimulation() {
+    const btn = document.getElementById('run_btn');
+    btn.disabled = true;
+    btn.innerText = 'Running...';
+
+    const status = document.getElementById('status');
+    status.style.display = 'block';
+    status.className = 'status running';
+    status.innerText = 'Running simulation...';
+
+    // Get parameters
+    const nCrabs = parseInt(document.getElementById('inp_n_crabs').value);
+    const simTime = parseInt(document.getElementById('inp_sim_time').value);
+    const energyInit = parseFloat(document.getElementById('inp_energy_init').value);
+    const energyMax = parseFloat(document.getElementById('inp_energy_max').value);
+    const foragingGain = parseFloat(document.getElementById('inp_foraging_gain').value);
+    const restingCost = parseFloat(document.getElementById('inp_resting_cost').value);
+    const moltingCost = parseFloat(document.getElementById('inp_molting_cost').value);
+    const moltGrowth = parseFloat(document.getElementById('inp_molt_growth').value);
+    const foragingRate = parseFloat(document.getElementById('inp_foraging_rate').value);
+    const restingRate = parseFloat(document.getElementById('inp_resting_rate').value);
+    const moltingRate = parseFloat(document.getElementById('inp_molting_rate').value);
+    const mortalityRate = parseFloat(document.getElementById('inp_mortality_rate').value);
+    const sizeMin = parseFloat(document.getElementById('inp_size_min').value);
+    const sizeMax = parseFloat(document.getElementById('inp_size_max').value);
+
+    // Run in setTimeout to allow UI update
+    setTimeout(() => {
+      const result = runABM(nCrabs, simTime, {
+        energyInit, energyMax, foragingGain, restingCost, moltingCost,
+        moltGrowth, foragingRate, restingRate, moltingRate, mortalityRate,
+        sizeMin, sizeMax
+      });
+      displayResults(result);
+      btn.disabled = false;
+      btn.innerText = 'Run Simulation';
+      status.className = 'status done';
+      status.innerText = 'Simulation complete.';
+    }, 50);
+  }
+
+  function runABM(nCrabs, simTime, p) {
+    // Initialize crabs
+    let crabs = [];
+    for (let i = 0; i < nCrabs; i++) {
+      crabs.push({
+        state: 'foraging',
+        energy: p.energyInit,
+        size: p.sizeMin + Math.random() * (p.sizeMax - p.sizeMin),
+        x: Math.random(),
+        y: Math.random(),
+        age: 0,
+        sex: Math.random() < 0.5 ? 'M' : 'F',
+        nextEvent: -Math.log(Math.random()) / p.foragingRate
+      });
+    }
+
+    // Time series data
+    let ts = [];
+    for (let t = 0; t <= simTime; t++) {
+      // Count states
+      let counts = {foraging:0, resting:0, molting:0, dead:0};
+      let sizes = [];
+      let positions = [];
+      for (let c of crabs) {
+        if (c.state !== 'dead') {
+          counts[c.state]++;
+          sizes.push(c.size);
+          positions.push({x: c.x, y: c.y, state: c.state, sex: c.sex});
+        } else {
+          counts.dead++;
+        }
+      }
+      let meanSize = sizes.length > 0 ? sizes.reduce((a,b)=>a+b,0)/sizes.length : 0;
+
+      ts.push({
+        time: t,
+        foraging: counts.foraging,
+        resting: counts.resting,
+        molting: counts.molting,
+        dead: counts.dead,
+        meanSize: meanSize,
+        positions: positions,
+        sizes: sizes,
+        sexes: crabs.filter(c=>c.state!=='dead').map(c=>c.sex)
+      });
+
+      if (t < simTime) {
+        // Step: update each crab
+        for (let c of crabs) {
+          if (c.state === 'dead') continue;
+          // Energy decay
+          c.energy -= p.restingCost * 0.1;
+          // Random movement
+          c.x = Math.max(0, Math.min(1, c.x + (Math.random()-0.5)*0.02));
+          c.y = Math.max(0, Math.min(1, c.y + (Math.random()-0.5)*0.02));
+          c.age += 1;
+
+          // State transitions based on exponential rates
+          let r = Math.random();
+          let rate = 0;
+          if (c.state === 'foraging') rate = p.restingRate + p.moltingRate + p.mortalityRate;
+          else if (c.state === 'resting') rate = p.foragingRate + p.mortalityRate * 0.5;
+          else if (c.state === 'molting') rate = 0.5;
+
+          if (r < rate * 0.1) {
+            // Transition
+            if (c.state === 'foraging') {
+              let r2 = Math.random();
+              if (r2 < p.moltingRate / rate) {
+                c.state = 'molting';
+                c.energy = Math.max(0, c.energy - p.moltingCost);
+                c.size += p.moltGrowth;
+              } else if (r2 < (p.moltingRate + p.mortalityRate) / rate && c.energy <= 0) {
+                c.state = 'dead';
+              } else {
+                c.state = 'resting';
+              }
+            } else if (c.state === 'resting') {
+              if (Math.random() < p.mortalityRate * 0.5 / (p.foragingRate + p.mortalityRate * 0.5) && c.energy <= 0) {
+                c.state = 'dead';
+              } else {
+                c.state = 'foraging';
+                c.energy = Math.min(p.energyMax, c.energy + p.foragingGain);
+              }
+            } else if (c.state === 'molting') {
+              c.state = 'foraging';
+              c.energy = Math.min(p.energyMax, c.energy + p.foragingGain * 0.5);
+            }
+          }
+
+          // Foraging energy gain
+          if (c.state === 'foraging') {
+            c.energy = Math.min(p.energyMax, c.energy + p.foragingGain * 0.1);
+          }
+          // Starvation check
+          if (c.energy <= 0 && c.state !== 'dead') {
+            c.state = 'dead';
+          }
+        }
+      }
+    }
+    return ts;
+  }
+
+  function displayResults(result) {
+    const last = result[result.length-1];
+
+    // KPIs
+    document.getElementById('kpi_total').innerText = result[0].foraging + result[0].resting + result[0].molting;
+    document.getElementById('kpi_foraging').innerText = last.foraging;
+    document.getElementById('kpi_dead').innerText = last.dead;
+    document.getElementById('kpi_mean_size').innerText = last.meanSize.toFixed(2);
+
+    // Population Dynamics Chart
+    const popCtx = document.getElementById('popChart').getContext('2d');
+    if (window.popChartInstance) window.popChartInstance.destroy();
+    window.popChartInstance = new Chart(popCtx, {
+      type: 'line',
+      data: {
+        labels: result.map(d => d.time),
+        datasets: [
+          { label: 'Foraging', data: result.map(d => d.foraging), borderColor: '#2ecc71', tension: 0.3, pointRadius: 2 },
+          { label: 'Resting', data: result.map(d => d.resting), borderColor: '#3498db', tension: 0.3, pointRadius: 2 },
+          { label: 'Molting', data: result.map(d => d.molting), borderColor: '#f39c12', tension: 0.3, pointRadius: 2 },
+          { label: 'Dead', data: result.map(d => d.dead), borderColor: '#e74c3c', tension: 0.3, pointRadius: 2 }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } } }
+    });
+
+    // State Distribution Chart
+    const stateCtx = document.getElementById('stateChart').getContext('2d');
+    if (window.stateChartInstance) window.stateChartInstance.destroy();
+    window.stateChartInstance = new Chart(stateCtx, {
+      type: 'bar',
+      data: {
+        labels: ['Foraging', 'Resting', 'Molting', 'Dead'],
+        datasets: [{
+          data: [last.foraging, last.resting, last.molting, last.dead],
+          backgroundColor: ['#2ecc71', '#3498db', '#f39c12', '#e74c3c']
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
+
+    // Size Distribution by Sex
+    const allSizes = result.flatMap(d => d.sizes);
+    const allSexes = result.flatMap(d => d.sexes);
+    const maleSizes = allSizes.filter((s,i) => allSexes[i] === 'M');
+    const femaleSizes = allSizes.filter((s,i) => allSexes[i] === 'F');
+
+    const sizeCtx = document.getElementById('sizeChart').getContext('2d');
+    if (window.sizeChartInstance) window.sizeChartInstance.destroy();
+    window.sizeChartInstance = new Chart(sizeCtx, {
+      type: 'bar',
+      data: {
+        labels: Array.from({length: 20}, (_, i) => (0.5 + i*0.1).toFixed(1)),
+        datasets: [
+          { label: 'Male', data: Array.from({length: 20}, (_, i) => maleSizes.filter(s => s >= 0.5+i*0.1 && s < 0.6+i*0.1).length), backgroundColor: 'rgba(52,152,219,0.7)' },
+          { label: 'Female', data: Array.from({length: 20}, (_, i) => femaleSizes.filter(s => s >= 0.5+i*0.1 && s < 0.6+i*0.1).length), backgroundColor: 'rgba(231,76,60,0.7)' }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+
+    // Stage/Size Class Distribution
+    const stageCtx = document.getElementById('stageChart').getContext('2d');
+    if (window.stageChartInstance) window.stageChartInstance.destroy();
+    window.stageChartInstance = new Chart(stageCtx, {
+      type: 'bar',
+      data: {
+        labels: ['0.5-0.7', '0.7-0.9', '0.9-1.1', '1.1-1.3', '1.3-1.5', '1.5+'],
+        datasets: [{
+          label: 'Count',
+          data: [
+            allSizes.filter(s => s < 0.7).length,
+            allSizes.filter(s => s >= 0.7 && s < 0.9).length,
+            allSizes.filter(s => s >= 0.9 && s < 1.1).length,
+            allSizes.filter(s => s >= 1.1 && s < 1.3).length,
+            allSizes.filter(s => s >= 1.3 && s < 1.5).length,
+            allSizes.filter(s => s >= 1.5).length
+          ],
+          backgroundColor: '#8b5cf6'
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
+
+    // Environmental Distribution
+    const envCtx = document.getElementById('envChart').getContext('2d');
+    if (window.envChartInstance) window.envChartInstance.destroy();
+    window.envChartInstance = new Chart(envCtx, {
+      type: 'line',
+      data: {
+        labels: result.map(d => d.time),
+        datasets: [
+          { label: 'Foraging Count', data: result.map(d => d.foraging), borderColor: '#2ecc71', fill: true, backgroundColor: 'rgba(46,204,113,0.1)', tension: 0.3 },
+          { label: 'Mean Size', data: result.map(d => d.meanSize), borderColor: '#e67e22', yAxisID: 'y1', tension: 0.3 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          y: { title: { display: true, text: 'Count' } },
+          y1: { position: 'right', title: { display: true, text: 'Size (mm)' }, grid: { drawOnChartArea: false } }
+        }
+      }
+    });
+
+    // Spatial Distribution
+    const spatialCtx = document.getElementById('spatialChart').getContext('2d');
+    if (window.spatialChartInstance) window.spatialChartInstance.destroy();
+    window.spatialChartInstance = new Chart(spatialCtx, {
+      type: 'scatter',
+      data: {
+        datasets: [
+          { label: 'Foraging', data: last.positions.filter(p=>p.state==='foraging').map(p=>({x:p.x,y:p.y})), backgroundColor: '#2ecc71' },
+          { label: 'Resting', data: last.positions.filter(p=>p.state==='resting').map(p=>({x:p.x,y:p.y})), backgroundColor: '#3498db' },
+          { label: 'Molting', data: last.positions.filter(p=>p.state==='molting').map(p=>({x:p.x,y:p.y})), backgroundColor: '#f39c12' }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, scales: { x: { min:0, max:1, title:{display:true,text:'X'} }, y: { min:0, max:1, title:{display:true,text:'Y'} } } }
+    });
+
+    // Data Table
+    const tbody = document.querySelector('#dataTable tbody');
+    tbody.innerHTML = '';
+    result.forEach(d => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>'+d.time+'</td><td>'+d.foraging+'</td><td>'+d.resting+'</td><td>'+d.molting+'</td><td>'+d.dead+'</td>';
+      tbody.appendChild(tr);
+    });
+  }
+  </script>
+</body>
+</html>

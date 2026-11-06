@@ -1,0 +1,6 @@
+function (time, handler) 
+{
+    .Call(`_ABM_newEvent`, time, handler)
+}
+<bytecode: 0x000001f74adbb9a0>
+<environment: namespace:ABM>

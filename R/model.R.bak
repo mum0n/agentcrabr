@@ -1,0 +1,523 @@
+# Crab Agent-Based Model (TethysBio-faithful)
+# All sizes in mm (carapace width), matching TethysBio reference implementation.
+
+library(ABM)
+
+# --- Helper functions (defined outside for scope) ---
+
+calculate_mass <- function(size, sex, is_mature) {
+  if (sex == "M") {
+    alpha <- if (is_mature) 0.0001830 else 0.0002665
+    beta <- if (is_mature) 3.160 else 3.098
+  } else {
+    alpha <- if (is_mature) 0.0004500 else 0.0003440
+    beta <- if (is_mature) 2.920 else 2.980
+  }
+  alpha * (size ^ beta)
+}
+
+clamp <- function(x, lo, hi) max(lo, min(hi, x))
+
+#' Create a crab simulation with TethysBio-faithful biological rules
+create_crab_simulation <- function(n_crabs = 50, params = list()) {
+  p <- list(
+    # --- Grid / Spatial ---
+    grid_nx = 100, grid_ny = 100, world_size = 1.0, no_take_proportion = 0.0,
+
+    # --- General / Life History ---
+    energy_init = 10.0, energy_max = 20.0,
+    size_init_min = 20.0, size_init_max = 40.0,
+    legal_size_male = 95.0, maturity_size_gate = 35.0,
+    juvenile_max_stage = 6, max_stage_male = 19, max_stage_female = 16,
+    adult_size_threshold = 68.0,
+
+    # --- Sex-specific growth (males grow faster/larger) ---
+    growth_rate_male = 0.15, growth_rate_female = 0.10,
+    max_size_male = 160.0, max_size_female = 95.0,
+
+    # --- Hiatt growth parameters (log-size: ln(CW_next) = beta0 + beta1*ln(CW_prev) + ...) ---
+    growth_beta0_male = 0.30153, growth_beta0_female = 0.1931,
+    growth_beta1_male = 1.00027, growth_beta1_female = 1.0372,
+    growth_slp_male = 1.00027, growth_slp_female = 1.0372,
+    growth_beta2_male = -0.00643655, growth_beta2_female = -0.017376,
+    growth_beta3_male = 0.0017492, growth_beta3_female = 0.005068,
+    growth_condition_coefficient = 0.05,
+    growth_temperature_coefficient = -0.004,
+    growth_temperature_reference = 4.0,
+    growth_residual_sd = 0.04,
+    growth_min_expansion_immature = 0.12,
+    growth_min_expansion_mature = 0.06,
+
+    # --- Maturity penalty at maturity (log-size) ---
+    growth_maturation_penalty_male_mean = -0.13564,
+    growth_maturation_penalty_male_sd = 0.00922,
+    growth_maturation_penalty_female_mean = -0.131,
+    growth_maturation_penalty_female_sd = 0.0252,
+
+    # --- Sex-specific maturity (L50, logistic ogive, mm) ---
+    maturity_l50_male = 91.8, maturity_l50_female = 51.6,
+    maturity_slope_male = 6.9957, maturity_slope_female = 12.9812,
+
+    # --- Fecundity (females only) ---
+    fecundity_primiparous_intercept = -0.7229, fecundity_primiparous_slope = 2.94,
+    fecundity_primiparous_err = 0.09,
+    fecundity_multiparous_intercept = 0.0158, fecundity_multiparous_slope = 2.5811,
+    fecundity_multiparous_err = 0.145,
+    fecundity_intercept_sd = 0.05,
+    fecundity_stmarie_exponent = 2.725, fecundity_stmarie_coefficient = 0.7311,
+    fecundity_senescence_threshold = 3.0, fecundity_senescence_floor = 0.6,
+    fecundity_senescence_rate = 0.08,
+    primiparous_shell_age_max = 2.0, fecundity_parity_size_split = 65.0,
+
+    # --- Fishing (males only) ---
+    fishing_probability = 0.05, selectivity_s50 = 95.0, selectivity_sigma = 5.0,
+
+    # --- Energetics (Kleiber + Holling II) ---
+    energy_gain_foraging = 0.3, energy_cost_resting = 0.05,
+    energy_cost_molting = 3,
+    metabolic_rate_base = 0.01, metabolic_mass_exponent = 0.75,
+    metabolic_temperature_coefficient = 0.08,
+    metabolic_optimal_temperature = 3.0, metabolic_optimal_sigma = 2.5,
+    assimilation_efficiency = 0.75, specific_dynamic_action = 0.15,
+    half_saturation_food = 2.0, intake_rate_base = 0.05,
+
+    # --- Molting ---
+    molt_growth_male = 0.12, molt_growth_female = 0.08,
+    molting_rate = 0.05, min_intermolt_days = 30,
+    minimum_clutch_size = 1000,
+    resting_rate = 0.3, foraging_rate = 0.5,
+    molt_season_start = 15, molt_season_end = 140,
+    molt_thermal_onset = 10.0, molt_thermal_bandwidth = 3.0,
+    degree_day_base = 2.0,
+
+    # --- Mortality ---
+    mortality_rate = 0.02, predation_rate = 0.05,
+    starvation_rate = 0.20, thermal_rate = 0.05,
+    senescence_rate = 0.05, cannibalism_rate = 0.05,
+    repro_rate = 0.1,
+    carrying_capacity = 10000, carrying_capacity_exponent = 2.0,
+
+    # --- Handling mortality ---
+    handling_mortality_days = 365, handling_mortality_rate = 0.05
+  )
+  p <- modifyList(p, params)
+
+  get_max_size <- function(org) {
+    if (org$sex == "M") p$max_size_male else p$max_size_female
+  }
+
+  get_maturity_prob <- function(org) {
+    if (org$size < p$maturity_size_gate) return(0.0)
+    l50 <- if (org$sex == "M") p$maturity_l50_male else p$maturity_l50_female
+    slope <- if (org$sex == "M") p$maturity_slope_male else p$maturity_slope_female
+    1.0 / (1.0 + exp(-slope * (org$size - l50)))
+  }
+
+  is_legal_male <- function(org) {
+    org$sex == "M" && org$mature == "1" && org$size >= p$legal_size_male && org$legal == "1"
+  }
+
+  # --- Energetics: Kleiber metabolism + Holling Type II feeding ---
+  calc_energy_change <- function(org, temp, food) {
+    mass <- org$mass
+    # Kleiber metabolic cost
+    mass_scaling <- mass ^ p$metabolic_mass_exponent
+    metabolic_temp_factor <- exp(p$metabolic_temperature_coefficient * temp)
+    t_opt <- p$metabolic_optimal_temperature
+    t_sigma <- p$metabolic_optimal_sigma
+    thermal_modifier <- exp(-((temp - t_opt)^2) / (2.0 * t_sigma^2))
+    maintenance_cost <- p$metabolic_rate_base * mass_scaling *
+                        metabolic_temp_factor * thermal_modifier
+
+    # Holling Type II intake
+    intake_demand <- p$intake_rate_base * (food / (food + p$half_saturation_food)) * mass_scaling
+    actual_intake <- min(intake_demand, max(0, food))
+    assim_eff <- p$assimilation_efficiency
+    sda <- p$specific_dynamic_action
+    usable_fraction <- 1.0 - sda
+    net_assimilation <- (actual_intake * assim_eff * usable_fraction) - maintenance_cost
+
+    return(net_assimilation)
+  }
+
+  # --- Molting probability ---
+  molt_probability <- function(org, temp, day_of_year) {
+    if (org$mature == "1") return(0.0)
+
+    days_since_molt <- org$age_days - org$last_molt_time
+    min_intermolt <- p$min_intermolt_days
+    if (days_since_molt < min_intermolt) return(0.0)
+
+    min_dd <- p$min_intermolt_days * p$degree_day_base
+    if (org$degree_days < min_dd) return(0.0)
+
+    # Seasonal gate for stages at or above juvenile_max_stage
+    if (org$stage >= p$juvenile_max_stage) {
+      in_season <- p$molt_season_start <= day_of_year && day_of_year <= p$molt_season_end
+      if (!in_season) return(0.0)
+    }
+
+    # Energy requirement
+    req_e <- max(p$energy_cost_molting * 0.1, p$energy_cost_molting * 0.05 * org$size)
+    if (org$energy_reserve < req_e) return(0.0)
+
+    # Thermal inhibition
+    onset <- p$molt_thermal_onset
+    bw <- p$molt_thermal_bandwidth
+    therm_inhib <- if (temp > onset && bw > 0) {
+      max(0, 1 - ((temp - onset) / bw)^2)
+    } else 1.0
+    if (therm_inhib <= 0) return(0.0)
+
+    progress <- min(org$degree_days / min_dd, 1.0)
+    lambda <- 0.15 * progress * therm_inhib
+    return(1 - exp(-lambda))
+  }
+
+  # --- Mortality components ---
+  mortality_components <- function(org, temp, local_density, day_of_year) {
+    dt <- 1.0
+    dpy <- 365.0
+
+    # Individual mortality factor from trait quantile
+    q_mort <- org$tq_mortality
+    individual_mort_factor <- exp(0.25 * qnorm(q_mort))
+
+    # Baseline by stage
+    base_rate_by_stage <- c(
+      0.35, 0.35, 0.35, 0.35,
+      0.15, 0.15, 0.15, 0.15,
+      0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08,
+      0.06
+    )
+    base_rate <- base_rate_by_stage[min(org$stage, length(base_rate_by_stage))]
+
+    # Density feedback: 1 + (N/K)^exponent
+    # Use global last_positions to estimate N
+    pos <- get("last_positions", envir = .GlobalEnv, inherits = TRUE)
+    N <- if (!is.null(pos)) nrow(pos) else p$carrying_capacity
+    feedback <- 1 + (N / p$carrying_capacity)^p$carrying_capacity_exponent
+
+    base_daily <- (base_rate / dpy) * individual_mort_factor * feedback * dt
+
+    # Predation attenuated by size
+    size_excess <- max(0, org$size - 5.0)
+    predation_risk <- ((0.05 / dpy) * exp(-0.03 * size_excess)) * dt
+
+    # Soft-shell post-molt
+    days_since_molt <- max(0, org$age_days - org$last_molt_time)
+    soft_shell_risk <- if (days_since_molt > 30) 0.0 else
+      ((0.12 / dpy) * exp(-days_since_molt / 15)) * dt
+
+    # Starvation
+    starvation_risk <- if (org$energy_reserve < 0) {
+      deficit <- -org$energy_reserve
+      crit_pool <- max(0.5, org$mass * 0.05)
+      ((0.20 / dpy) * (1 - exp(-deficit / crit_pool))) * dt
+    } else 0.0
+
+    # Thermal stress
+    thermal_risk <- if (temp > 8.0) {
+      raw <- ((0.05 / dpy) * ((temp - 8.0)^1.5)) * dt
+      clamp(raw, 0, 1)
+    } else 0.0
+
+    # Senescence (terminal stage, mature adults)
+    terminal <- if (org$sex == "M") p$max_stage_male else p$max_stage_female
+    senescence_risk <- if (org$mature == "1" && org$stage >= terminal) {
+      age_years <- max(0, (org$age_days - 180 * (org$stage - 6))) / 365
+      thresh <- 3.0
+      if (age_years > thresh) {
+        lambda_per_year <- 0.05 * exp(0.80 * (age_years - thresh))
+        raw <- -expm1(-lambda_per_year * dt / dpy)
+        clamp(raw, 0, 1)
+      } else 0.0
+    } else 0.0
+
+    # Cannibalism
+    cannibalism_risk <- if (org$size < 35 && local_density > 0) {
+      ((0.05 / dpy) *
+       min(local_density / 10.0, 2.0)) * dt
+    } else 0.0
+
+    raw_total <- base_daily + predation_risk + soft_shell_risk +
+      starvation_risk + thermal_risk + senescence_risk + cannibalism_risk
+    total_prob <- clamp(raw_total, 0, 1)
+
+    return(list(
+      baseline = base_daily, predation = predation_risk,
+      soft_shell = soft_shell_risk, starvation = starvation_risk,
+      thermal = thermal_risk, senescence = senescence_risk,
+      cannibalism = cannibalism_risk, total = total_prob
+    ))
+  }
+
+  sim <- Simulation$new(n_crabs, function(i) {
+    sex <- sample(c("M", "F"), 1)
+    stage <- p$juvenile_max_stage + sample.int(5, 1)
+    max_stage <- if (sex == "M") p$max_stage_male else p$max_stage_female
+    stage <- min(stage, max_stage)
+    # Initial size drawn from beta distribution around stage-appropriate mean
+    size_init <- runif(1, p$size_init_min, p$size_init_max)
+    if (sex == "M") size_init <- min(size_init * 1.2, p$max_size_male)
+    else size_init <- min(size_init, p$max_size_female)
+
+    # Trait quantiles (individual heterogeneity)
+    tq_growth <- runif(1, 0.01, 0.99)
+    tq_maturity <- runif(1, 0.01, 0.99)
+    tq_fecundity <- runif(1, 0.01, 0.99)
+    tq_mortality <- runif(1, 0.01, 0.99)
+
+    # Determine maturity at initialization via ogive
+    l50 <- if (sex == "M") p$maturity_l50_male else p$maturity_l50_female
+    slope <- if (sex == "M") p$maturity_slope_male else p$maturity_slope_female
+    mat_prob <- if (size_init < p$maturity_size_gate) 0.0 else
+      1.0 / (1.0 + exp(-slope * (size_init - l50)))
+    is_mature <- if (stage >= max_stage) "1"
+      else if (runif(1) < mat_prob) "1" else "0"
+
+    legal <- if (sex == "M" && is_mature == "1" && size_init >= p$legal_size_male) "1" else "0"
+
+    # Mass allometry (sex-specific, maturity-specific)
+    mass <- calculate_mass(size_init, sex, is_mature == "1")
+
+    # Initial degree-days drawn from range
+    init_dd <- runif(1, p$degree_day_base * 25, p$degree_day_base * 150)
+
+    list(
+      state = "foraging", energy = p$energy_init, size = size_init,
+      stage = stage, mature = is_mature, sex = sex,
+      x = runif(1), y = runif(1), age_days = 0, degree_days = init_dd,
+      energy_reserve = p$energy_init, last_molt_time = 0,
+      shell_age_days = 0,
+      egg_count = 0, sperm_clutches = 0, hatch_day = 0,
+      is_mating_ready = if (is_mature == "1") "1" else "0", legal = legal,
+      mass = mass,
+      tq_growth = tq_growth, tq_maturity = tq_maturity,
+      tq_fecundity = tq_fecundity, tq_mortality = tq_mortality
+    )
+  })
+
+  # --- Transitions ---
+
+  # Foraging -> Resting
+  sim$addTransition(
+    list(state = "foraging") -> list(state = "resting"),
+    newExpWaitingTime(1 / p$resting_rate),
+    changed_callback = function(time, agent) {
+      st <- getState(agent)
+      setState(agent, list(
+        energy = max(0, st$energy - p$energy_cost_resting),
+        shell_age_days = st$shell_age_days + 1
+      ))
+    }
+  )
+
+  # Resting -> Foraging
+  sim$addTransition(
+    list(state = "resting") -> list(state = "foraging"),
+    newExpWaitingTime(1 / p$foraging_rate),
+    changed_callback = function(time, agent) {
+      st <- getState(agent)
+      setState(agent, list(energy = min(p$energy_max, st$energy + p$energy_gain_foraging)))
+    }
+  )
+
+  # Foraging -> Molting
+  sim$addTransition(
+    list(state = "foraging") -> list(state = "molting"),
+    newExpWaitingTime(1 / p$molting_rate),
+    changed_callback = function(time, agent) {
+      st <- getState(agent)
+      day_of_year <- time %% 365
+      mp <- molt_probability(st, 8, day_of_year)
+      if (runif(1) < mp) {
+        # Hiatt growth: ln(CW_next) = beta0 + beta1*ln(CW_prev) + maturity_penalty + temp_effect
+        sp <- p
+        if (st$sex == "F") {
+          beta0 <- sp$growth_beta0_female
+          beta1 <- sp$growth_beta1_female
+          slp <- sp$growth_slp_female
+          beta2 <- sp$growth_beta2_female
+          beta3 <- sp$growth_beta3_female
+          mat_pen_mean <- sp$growth_maturation_penalty_female_mean
+          max_sz <- sp$max_size_female
+        } else {
+          beta0 <- sp$growth_beta0_male
+          beta1 <- sp$growth_beta1_male
+          slp <- sp$growth_slp_male
+          beta2 <- sp$growth_beta2_male
+          beta3 <- sp$growth_beta3_male
+          mat_pen_mean <- sp$growth_maturation_penalty_male_mean
+          max_sz <- sp$max_size_male
+        }
+        ln_cw <- log(max(0.1, st$size))
+        is_mat <- if (st$mature == "1") 1 else 0
+        # Maturity penalty drawn from trait quantile
+        mat_pen <- rnorm(1, mat_pen_mean, if (st$sex == "F") sp$growth_maturation_penalty_female_sd else sp$growth_maturation_penalty_male_sd)
+        # Temperature effect (using current env temp, approx 4C for deep sea)
+        temp_effect <- sp$growth_temperature_coefficient * (8 - sp$growth_temperature_reference)
+        ln_next <- beta0 + beta1 * ln_cw + mat_pen * is_mat + temp_effect + rnorm(1, 0, sp$growth_residual_sd)
+        new_size <- min(max_sz, exp(ln_next))
+        new_energy <- max(0, st$energy - p$energy_cost_molting)
+        mat_prob <- get_maturity_prob(list(size = new_size, sex = st$sex, mature = st$mature))
+        new_mature <- if (st$mature == "1") "1" else if (runif(1) < mat_prob) "1" else "0"
+        new_legal <- if (st$sex == "M" && new_mature == "1" && new_size >= p$legal_size_male) "1" else "0"
+        new_stage <- min(st$stage + 1, if (st$sex == "M") p$max_stage_male else p$max_stage_female)
+        new_mass <- calculate_mass(new_size, st$sex, new_mature == "1")
+        setState(agent, list(
+          size = new_size, energy = new_energy, mature = new_mature,
+          legal = new_legal, stage = new_stage, mass = new_mass,
+          last_molt_time = st$age_days, degree_days = 0,
+          shell_age_days = 0
+        ))
+      } else {
+        setState(agent, list(state = "foraging"))
+      }
+    }
+  )
+
+  # Molting -> Foraging
+  sim$addTransition(
+    list(state = "molting") -> list(state = "foraging"),
+    newExpWaitingTime(2),
+    changed_callback = function(time, agent) {
+      st <- getState(agent)
+      gain <- if (st$sex == "M") p$energy_gain_foraging * 0.5 else p$energy_gain_foraging * 0.3
+      setState(agent, list(energy = min(p$energy_max, st$energy + gain)))
+    }
+  )
+
+  # Foraging -> Dead (all mortality causes)
+  sim$addTransition(
+    list(state = "foraging") -> list(state = "dead"),
+    newExpWaitingTime(1 / p$mortality_rate),
+    to_change_callback = function(time, agent) {
+      st <- getState(agent)
+      st$energy <= 0
+    }
+  )
+
+  # Resting -> Dead
+  sim$addTransition(
+    list(state = "resting") -> list(state = "dead"),
+    newExpWaitingTime(1 / (p$mortality_rate * 0.5)),
+    to_change_callback = function(time, agent) {
+      st <- getState(agent)
+      st$energy <= 0
+    }
+  )
+
+  # Harvest (fishing) on legal males
+  sim$addTransition(
+    list(state = "foraging", legal = "1") -> list(state = "harvested"),
+    newExpWaitingTime(1 / p$fishing_probability),
+    to_change_callback = function(time, agent) {
+      st <- getState(agent)
+      is_legal_male(st)
+    }
+  )
+
+  # Female reproduction (egg production)
+  sim$addTransition(
+    list(state = "foraging", sex = "F", mature = "1") -> list(state = "reproducing"),
+    newExpWaitingTime(1 / p$repro_rate),
+    changed_callback = function(time, agent) {
+      st <- getState(agent)
+      # Fecundity: size-dependent allometric (Moncton form) with primiparous/multiparous forms
+      shell_age_years <- st$age_days / 365.0
+      is_primiparous <- shell_age_years <= sp$primiparous_shell_age_max
+      if (is_primiparous) {
+        intercept <- sp$fecundity_primiparous_intercept
+        slope <- sp$fecundity_primiparous_slope
+      } else {
+        intercept <- sp$fecundity_multiparous_intercept
+        slope <- sp$fecundity_multiparous_slope
+      }
+      log_eggs <- intercept + slope * log(max(1.0, st$size))
+      fec <- exp(log_eggs)
+      # Senescence discount for older females
+      if (shell_age_years > sp$fecundity_senescence_threshold) {
+        discount <- max(sp$fecundity_senescence_floor,
+                        1.0 - sp$fecundity_senescence_rate * (shell_age_years - sp$fecundity_senescence_threshold))
+        fec <- fec * discount
+      }
+      fec <- max(sp$minimum_clutch_size, fec)
+      setState(agent, list(egg_count = round(fec)))
+    }
+  )
+
+  # Reproducing -> Foraging
+  sim$addTransition(
+    list(state = "reproducing") -> list(state = "foraging"),
+    newExpWaitingTime(2),
+    changed_callback = function(time, agent) {
+      st <- getState(agent)
+      setState(agent, list(egg_count = 0))
+    }
+  )
+
+  # --- Loggers (all string values for mature/legal) ---
+  sim$addLogger(newCounter("foraging", list(state = "foraging")))
+  sim$addLogger(newCounter("resting", list(state = "resting")))
+  sim$addLogger(newCounter("molting", list(state = "molting")))
+  sim$addLogger(newCounter("dead", list(state = "dead")))
+  sim$addLogger(newCounter("harvested", list(state = "harvested")))
+  sim$addLogger(newCounter("reproducing", list(state = "reproducing")))
+  sim$addLogger(newCounter("mature_male", list(sex = "M", mature = "1")))
+  sim$addLogger(newCounter("mature_female", list(sex = "F", mature = "1")))
+  sim$addLogger(newCounter("legal_male", list(legal = "1")))
+
+  sim
+}
+
+#' Run crab simulation
+run_crab_simulation <- function(sim, times = seq(0, 50, by = 1)) {
+  res <- sim$run(times)
+  df <- as.data.frame(res)
+  # Collect final agent positions
+  positions <- data.frame(x = numeric(0), y = numeric(0), state = character(0),
+                          sex = character(0), size = numeric(0), mature = character(0),
+                          mass = numeric(0), stringsAsFactors = FALSE)
+  for (i in seq_len(sim$size)) {
+    ag <- sim$agent(i)
+    st <- getState(ag)
+    positions <- rbind(positions, data.frame(
+      x = st$x, y = st$y, state = st$state, sex = st$sex, size = st$size,
+      mature = st$mature, mass = st$mass, stringsAsFactors = FALSE
+    ))
+  }
+  assign("last_positions", positions, envir = .GlobalEnv)
+  df
+}
+
+compute_maturity_ogive <- function(sizes, l50, slope) {
+  1.0 / (1.0 + exp(-slope * (sizes - l50)))
+}
+
+compute_selectivity <- function(sizes, s50, sigma) {
+  1.0 / (1.0 + exp(-(sizes - s50) / sigma))
+}
+
+# TethysBio environmental functions (ported from dashboard_shared.jl)
+aoi_bottom_temperature <- function(depth, lat) {
+  z <- depth; phi <- lat
+  2.0 + 2.5 * exp(-((z - 150.0) / 60.0)^2) + 0.3 * (45.0 - phi)
+}
+
+aoi_habitat_suitability <- function(temp, depth, mult = 1.0, offset = 0.0) {
+  t_opt <- exp(-0.5 * ((temp - 2.0) / 2.2)^2)
+  z_opt <- exp(-0.5 * ((depth - 150.0) / 75.0)^2)
+  raw_hsi <- t_opt * z_opt
+  realized <- raw_hsi * mult + offset
+  max(0, min(1, realized))
+}
+
+aoi_domain_bounds <- function(lon, lat, span_meters = 1000) {
+  half_m <- span_meters / 2.0
+  lat_deg_len <- 111139.0
+  lon_deg_len <- max(1000.0, 111139.0 * cos(lat * pi / 180))
+  dlat <- half_m / lat_deg_len
+  dlon <- half_m / lon_deg_len
+  list(lon = c(lon - dlon, lon + dlon), lat = c(lat - dlat, lat + dlat))
+}

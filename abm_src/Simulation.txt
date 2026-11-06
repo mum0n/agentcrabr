@@ -1,0 +1,17 @@
+<R6Simulation> object generator
+  Inherits from: <Population>
+  Public:
+    initialize: function (simulation = 0, initializer = NULL) 
+    run: function (time) 
+    resume: function (time) 
+    addLogger: function (logger) 
+    addTransition: function (rule, waiting.time, to_change_callback = NULL, changed_callback = NULL) 
+    clone: function (deep = FALSE) 
+  Private:
+    parse.state: function (state, envir) 
+    parse.side: function (side, envir) 
+    parse: function (formula, envir) 
+  Parent env: <environment: namespace:ABM>
+  Locked objects: TRUE
+  Locked class: FALSE
+  Portable: TRUE

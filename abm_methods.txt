@@ -1,0 +1,648 @@
+=== Simulation public_methods ===
+list(initialize = function (simulation = 0, initializer = NULL) 
+{
+    if (typeof(simulation) == "externalptr") {
+        super$initialize(simulation)
+        return()
+    }
+    if (is.list(simulation)) {
+        private$agent = newSimulation(simulation)
+    }
+    else if (is.numeric(simulation)) {
+        private$agent = newSimulation(simulation, initializer)
+    }
+    else stop("invalid simulation argument")
+}, run = function (time) 
+{
+    as.data.frame(runSimulation(self$get, time))
+}, resume = function (time) 
+{
+    as.data.frame(resumeSimulation(self$get, time))
+}, addLogger = function (logger) 
+{
+    addLogger(self$get, logger)
+    invisible(self)
+}, addTransition = function (rule, waiting.time, to_change_callback = NULL, 
+    changed_callback = NULL) 
+{
+    l = private$parse(substitute(rule), parent.frame())
+    addTransition(self$get, l$from$first, l$from$second, l$to$first, 
+        l$to$second, l$contact, waiting.time, to_change_callback, 
+        changed_callback)
+    invisible(self)
+}, clone = function (deep = FALSE) 
+{
+    remap_func_envs <- function(objs, old_new_env_pairs) {
+        lapply(objs, function(x) {
+            if (is.function(x)) {
+                func_env <- environment(x)
+                for (i in seq_along(old_new_env_pairs)) {
+                  if (identical(func_env, old_new_env_pairs[[i]]$old)) {
+                    environment(x) <- old_new_env_pairs[[i]]$new
+                    break
+                  }
+                }
+            }
+            x
+        })
+    }
+    list2env2 <- function(x, envir = NULL, parent = emptyenv(), 
+        hash = (length(x) > 100), size = max(29L, length(x)), 
+        empty_to_null = TRUE) {
+        if (is.null(envir)) {
+            envir <- new.env(hash = hash, parent = parent, size = size)
+        }
+        if (length(x) == 0) {
+            if (empty_to_null) 
+                return(NULL)
+            else return(envir)
+        }
+        list2env(x, envir)
+    }
+    old <- list(list(enclosing = .subset2(self, ".__enclos_env__"), 
+        binding = self, private = NULL))
+    if (!is.environment(old[[1]]$enclosing)) {
+        stop("clone() must be called from an R6 object.")
+    }
+    old[[1]]$private <- old[[1]]$enclosing$private
+    has_private <- !is.null(old[[1]]$private)
+    portable <- !identical(old[[1]]$binding, old[[1]]$enclosing)
+    i <- 1
+    while (TRUE) {
+        if (is.null(old[[i]]$enclosing$super)) {
+            break
+        }
+        old[[i + 1]] <- list(binding = old[[i]]$enclosing$super, 
+            enclosing = old[[i]]$enclosing$super$.__enclos_env__)
+        i <- i + 1
+    }
+    if (deep) {
+        if (has_private && is.function(old[[1]]$private$deep_clone)) {
+            deep_clone <- old[[1]]$private$deep_clone
+        }
+        else {
+            deep_clone <- function(name, value) {
+                is_r6_object <- is.environment(value) && !is.null(get0(".__enclos_env__", 
+                  value, inherits = FALSE))
+                if (is_r6_object) {
+                  return(value$clone(deep = TRUE))
+                }
+                value
+            }
+        }
+    }
+    old_1_binding <- old[[1]]$binding
+    old_1_private <- old[[1]]$private
+    make_first_new_slice <- function(old_slice, portable) {
+        new_slice <- list(enclosing = NULL, binding = NULL)
+        has_private <- !is.null(old_slice$private)
+        if (portable) {
+            enclosing_parent <- parent.env(old_slice$enclosing)
+            binding_parent <- emptyenv()
+            if (has_private) {
+                private_parent <- emptyenv()
+                new_slice$private <- new.env(private_parent, 
+                  hash = FALSE)
+            }
+            new_slice$binding <- new.env(binding_parent, hash = FALSE)
+            new_slice$enclosing <- new.env(enclosing_parent, 
+                hash = FALSE)
+        }
+        else {
+            if (has_private) {
+                private_parent <- parent.env(old_slice$private)
+                new_slice$private <- new.env(private_parent, 
+                  hash = FALSE)
+                binding_parent <- new_slice$private
+                new_slice$binding <- new.env(binding_parent, 
+                  hash = FALSE)
+            }
+            else {
+                binding_parent <- parent.env(old_slice$binding)
+                new_slice$binding <- new.env(binding_parent, 
+                  hash = FALSE)
+            }
+            new_slice$enclosing <- new_slice$binding
+        }
+        new_slice$enclosing$self <- new_slice$binding
+        if (has_private) {
+            new_slice$enclosing$private <- new_slice$private
+        }
+        new_slice$binding$.__enclos_env__ <- new_slice$enclosing
+        new_slice
+    }
+    make_new_slice <- function(old_slice, self, private, enclosing_parent) {
+        enclosing <- new.env(enclosing_parent, hash = FALSE)
+        binding <- new.env(emptyenv(), hash = FALSE)
+        enclosing$self <- self
+        if (!is.null(private)) {
+            enclosing$private <- private
+        }
+        binding$.__enclos_env__ <- enclosing
+        list(enclosing = enclosing, binding = binding)
+    }
+    new <- list(make_first_new_slice(old[[1]], portable))
+    new_1_binding <- new[[1]]$binding
+    new_1_private <- new[[1]]$private
+    new_1_enclosing <- new[[1]]$enclosing
+    if (length(old) > 1) {
+        for (i in seq.int(2, length(old))) {
+            if (portable) {
+                enclosing_parent <- parent.env(old[[i]]$enclosing)
+            }
+            else {
+                enclosing_parent <- new_1_enclosing
+            }
+            new[[i]] <- make_new_slice(old[[i]], new_1_binding, 
+                new_1_private, enclosing_parent)
+        }
+        for (i in seq.int(1, length(old) - 1)) {
+            new[[i]]$enclosing$super <- new[[i + 1]]$binding
+        }
+    }
+    copy_slice <- function(old_slice, new_slice, old_new_enclosing_pairs, 
+        first_slice = FALSE) {
+        binding_names <- ls(old_slice$binding, all.names = TRUE)
+        if (!is.null(old_slice$enclosing$.__active__)) {
+            binding_names <- setdiff(binding_names, names(old_slice$enclosing$.__active__))
+        }
+        binding_copies <- mget(binding_names, envir = old_slice$binding)
+        keep_idx <- !(names(binding_copies) %in% c("self", "private", 
+            "super", ".__enclos_env__"))
+        binding_copies <- binding_copies[keep_idx]
+        binding_copies <- remap_func_envs(binding_copies, old_new_enclosing_pairs)
+        if (deep) {
+            binding_copies <- mapply(deep_clone, names(binding_copies), 
+                binding_copies, SIMPLIFY = FALSE)
+        }
+        list2env2(binding_copies, new_slice$binding)
+        if (!is.null(old_slice$enclosing$.__active__)) {
+            active_copies <- remap_func_envs(old_slice$enclosing$.__active__, 
+                old_new_enclosing_pairs)
+            for (name in names(active_copies)) {
+                makeActiveBinding(name, active_copies[[name]], 
+                  new_slice$binding)
+            }
+            new_slice$enclosing$.__active__ <- active_copies
+        }
+        if (!is.null(old_slice$private)) {
+            private_copies <- as.list.environment(old_slice$private, 
+                all.names = TRUE)
+            if (deep) {
+                private_copies <- mapply(deep_clone, names(private_copies), 
+                  private_copies, SIMPLIFY = FALSE)
+            }
+            private_copies <- remap_func_envs(private_copies, 
+                old_new_enclosing_pairs)
+            list2env2(private_copies, new_slice$private)
+        }
+        if (first_slice) {
+            method_envs <- lapply(old_new_enclosing_pairs, [[, 
+                "new")
+            is_method <- function(f, method_envs) {
+                env <- environment(f)
+                for (i in seq_along(method_envs)) {
+                  if (identical(env, method_envs[[i]])) {
+                    return(TRUE)
+                  }
+                }
+                FALSE
+            }
+            for (name in names(binding_copies)) {
+                if (is_method(new_slice$binding[[name]], method_envs)) 
+                  lockBinding(name, new_slice$binding)
+            }
+            if (has_private) {
+                for (name in names(private_copies)) {
+                  if (is_method(new_slice$private[[name]], method_envs)) 
+                    lockBinding(name, new_slice$private)
+                }
+            }
+        }
+    }
+    old_new_enclosing_pairs <- list()
+    for (i in seq_along(old)) {
+        old_new_enclosing_pairs[[i]] <- list(old = old[[i]]$enclosing, 
+            new = new[[i]]$enclosing)
+    }
+    for (i in seq_along(old)) {
+        copy_slice(old[[i]], new[[i]], old_new_enclosing_pairs[seq.int(i, 
+            length(old))], (i == 1))
+    }
+    if (environmentIsLocked(old_1_binding)) {
+        lockEnvironment(new_1_binding)
+    }
+    if (has_private && environmentIsLocked(old_1_private)) {
+        lockEnvironment(new_1_private)
+    }
+    if (is.function(.subset2(new_1_binding, "finalize"))) {
+        finalizer_wrapper <- function(e) {
+            .subset2(e, "finalize")()
+        }
+        environment(finalizer_wrapper) <- baseenv()
+        reg.finalizer(new_1_binding, finalizer_wrapper, onexit = TRUE)
+    }
+    if (has_private) {
+        if (is.function(.subset2(new_1_private, "finalize"))) {
+            finalizer_wrapper <- function(e) {
+                .subset2(e, ".__enclos_env__")$private$finalize()
+            }
+            environment(finalizer_wrapper) <- baseenv()
+            reg.finalizer(new_1_binding, finalizer_wrapper, onexit = TRUE)
+        }
+    }
+    class(new_1_binding) <- class(old_1_binding)
+    new_1_binding
+})
+=== Simulation private_methods ===
+list(parse.state = function (state, envir) 
+{
+    if (is.call(state)) {
+        op = as.character(state[[1]])
+        if (op != "list" && tolower(op) != "state") 
+            stop("invalid state ", as.character(state))
+        return(as.list(state)[-1])
+    }
+    if (is.name(state)) {
+        if (!exists(state, envir = envir)) 
+            stop("state ", as.character(state), " is not defined")
+        v = get(state, envir = envir)
+        if (!is.list(v)) 
+            stop("invalid state ", state, " :", v)
+        v
+    }
+    else if (!is.null(state)) {
+        list(state)
+    }
+    else stop("state cannot be NULL")
+}, parse.side = function (side, envir) 
+{
+    if (is.call(side) && as.character(side[[1]]) == "~") {
+        if (!exists(side[[3]], envir = envir)) 
+            stop(paste("the contact", as.character(contact), 
+                "does not exist"))
+        contact = get(side[[3]], envir = envir)
+        if (inherits(contact, "R6Contact")) 
+            contact = contact$get
+        side = side[[2]]
+    }
+    else contact = NULL
+    if (is.call(side) && as.character(side[[1]]) == "+") {
+        first = private$parse.state(side[[2]], envir = envir)
+        second = private$parse.state(side[[3]], envir = envir)
+    }
+    else {
+        first = private$parse.state(side, envir = envir)
+        second = NULL
+    }
+    list(first = first, second = second, contact = contact)
+}, parse = function (formula, envir) 
+{
+    if (as.character(formula[[1]]) != "<-") 
+        return(NULL)
+    to = private$parse.side(formula[[2]], envir = envir)
+    from = private$parse.side(formula[[3]], envir = envir)
+    contact = from$contact
+    if (!is.null(contact) && !is.null(to$contact)) 
+        stop("conact can only be specied once")
+    if (is.null(contact)) 
+        contact = to$contact
+    if ((!is.null(from$second) && is.null(to$second)) || (!is.null(from$second) && 
+        is.null(to$second))) 
+        stop("from and to arguments for a contact must both have two states")
+    if (is.null(from$second) && is.null(from$second) && !is.null(contact)) 
+        stop("contact is specified for a non-contact transition")
+    list(from = from, to = to, contact = contact)
+})
+=== Population public_methods ===
+list(initialize = function (population = 0, initializer = NULL) 
+{
+    if (typeof(population) == "externalptr") {
+        super$initialize(population)
+        return()
+    }
+    if (is.list(population)) {
+        private$agent = newPopulation(population)
+    }
+    else if (is.numeric(population)) {
+        private$agent = newPopulation(population, initializer)
+    }
+    else stop("invalid population argument")
+}, addAgent = function (agent) 
+{
+    if (inherits(agent, "R6Agent")) 
+        agent = agent$get
+    if (!inherits(agent, "Agent")) 
+        stop("invalid agent argument")
+    addAgent(private$agent, agent)
+    invisible(self)
+}, removeAgent = function (agent) 
+{
+    if (inherits(agent, "R6Agent")) 
+        agent = agent$get
+    if (!inherits(agent, "Agent")) 
+        stop("invalid agent argument")
+    removeAgent(private$agent, agent)
+    invisible(self)
+}, addContact = function (contact) 
+{
+    if (inherits(contact, "R6Contact")) 
+        contact = contact$get
+    if (!inherits(contact, "Contact")) 
+        stop("invalid contact argument")
+    addContact(private$agent, contact)
+    invisible(self)
+}, agent = function (i) 
+{
+    getAgent(private$agent, i)
+}, setState = function (i, state) 
+{
+    a = getAgent(private$agent, i)
+    setState(a, state)
+    invisible(self)
+}, setStates = function (states) 
+{
+    setStates(self$get, states)
+}, clone = function (deep = FALSE) 
+{
+    remap_func_envs <- function(objs, old_new_env_pairs) {
+        lapply(objs, function(x) {
+            if (is.function(x)) {
+                func_env <- environment(x)
+                for (i in seq_along(old_new_env_pairs)) {
+                  if (identical(func_env, old_new_env_pairs[[i]]$old)) {
+                    environment(x) <- old_new_env_pairs[[i]]$new
+                    break
+                  }
+                }
+            }
+            x
+        })
+    }
+    list2env2 <- function(x, envir = NULL, parent = emptyenv(), 
+        hash = (length(x) > 100), size = max(29L, length(x)), 
+        empty_to_null = TRUE) {
+        if (is.null(envir)) {
+            envir <- new.env(hash = hash, parent = parent, size = size)
+        }
+        if (length(x) == 0) {
+            if (empty_to_null) 
+                return(NULL)
+            else return(envir)
+        }
+        list2env(x, envir)
+    }
+    old <- list(list(enclosing = .subset2(self, ".__enclos_env__"), 
+        binding = self, private = NULL))
+    if (!is.environment(old[[1]]$enclosing)) {
+        stop("clone() must be called from an R6 object.")
+    }
+    old[[1]]$private <- old[[1]]$enclosing$private
+    has_private <- !is.null(old[[1]]$private)
+    portable <- !identical(old[[1]]$binding, old[[1]]$enclosing)
+    i <- 1
+    while (TRUE) {
+        if (is.null(old[[i]]$enclosing$super)) {
+            break
+        }
+        old[[i + 1]] <- list(binding = old[[i]]$enclosing$super, 
+            enclosing = old[[i]]$enclosing$super$.__enclos_env__)
+        i <- i + 1
+    }
+    if (deep) {
+        if (has_private && is.function(old[[1]]$private$deep_clone)) {
+            deep_clone <- old[[1]]$private$deep_clone
+        }
+        else {
+            deep_clone <- function(name, value) {
+                is_r6_object <- is.environment(value) && !is.null(get0(".__enclos_env__", 
+                  value, inherits = FALSE))
+                if (is_r6_object) {
+                  return(value$clone(deep = TRUE))
+                }
+                value
+            }
+        }
+    }
+    old_1_binding <- old[[1]]$binding
+    old_1_private <- old[[1]]$private
+    make_first_new_slice <- function(old_slice, portable) {
+        new_slice <- list(enclosing = NULL, binding = NULL)
+        has_private <- !is.null(old_slice$private)
+        if (portable) {
+            enclosing_parent <- parent.env(old_slice$enclosing)
+            binding_parent <- emptyenv()
+            if (has_private) {
+                private_parent <- emptyenv()
+                new_slice$private <- new.env(private_parent, 
+                  hash = FALSE)
+            }
+            new_slice$binding <- new.env(binding_parent, hash = FALSE)
+            new_slice$enclosing <- new.env(enclosing_parent, 
+                hash = FALSE)
+        }
+        else {
+            if (has_private) {
+                private_parent <- parent.env(old_slice$private)
+                new_slice$private <- new.env(private_parent, 
+                  hash = FALSE)
+                binding_parent <- new_slice$private
+                new_slice$binding <- new.env(binding_parent, 
+                  hash = FALSE)
+            }
+            else {
+                binding_parent <- parent.env(old_slice$binding)
+                new_slice$binding <- new.env(binding_parent, 
+                  hash = FALSE)
+            }
+            new_slice$enclosing <- new_slice$binding
+        }
+        new_slice$enclosing$self <- new_slice$binding
+        if (has_private) {
+            new_slice$enclosing$private <- new_slice$private
+        }
+        new_slice$binding$.__enclos_env__ <- new_slice$enclosing
+        new_slice
+    }
+    make_new_slice <- function(old_slice, self, private, enclosing_parent) {
+        enclosing <- new.env(enclosing_parent, hash = FALSE)
+        binding <- new.env(emptyenv(), hash = FALSE)
+        enclosing$self <- self
+        if (!is.null(private)) {
+            enclosing$private <- private
+        }
+        binding$.__enclos_env__ <- enclosing
+        list(enclosing = enclosing, binding = binding)
+    }
+    new <- list(make_first_new_slice(old[[1]], portable))
+    new_1_binding <- new[[1]]$binding
+    new_1_private <- new[[1]]$private
+    new_1_enclosing <- new[[1]]$enclosing
+    if (length(old) > 1) {
+        for (i in seq.int(2, length(old))) {
+            if (portable) {
+                enclosing_parent <- parent.env(old[[i]]$enclosing)
+            }
+            else {
+                enclosing_parent <- new_1_enclosing
+            }
+            new[[i]] <- make_new_slice(old[[i]], new_1_binding, 
+                new_1_private, enclosing_parent)
+        }
+        for (i in seq.int(1, length(old) - 1)) {
+            new[[i]]$enclosing$super <- new[[i + 1]]$binding
+        }
+    }
+    copy_slice <- function(old_slice, new_slice, old_new_enclosing_pairs, 
+        first_slice = FALSE) {
+        binding_names <- ls(old_slice$binding, all.names = TRUE)
+        if (!is.null(old_slice$enclosing$.__active__)) {
+            binding_names <- setdiff(binding_names, names(old_slice$enclosing$.__active__))
+        }
+        binding_copies <- mget(binding_names, envir = old_slice$binding)
+        keep_idx <- !(names(binding_copies) %in% c("self", "private", 
+            "super", ".__enclos_env__"))
+        binding_copies <- binding_copies[keep_idx]
+        binding_copies <- remap_func_envs(binding_copies, old_new_enclosing_pairs)
+        if (deep) {
+            binding_copies <- mapply(deep_clone, names(binding_copies), 
+                binding_copies, SIMPLIFY = FALSE)
+        }
+        list2env2(binding_copies, new_slice$binding)
+        if (!is.null(old_slice$enclosing$.__active__)) {
+            active_copies <- remap_func_envs(old_slice$enclosing$.__active__, 
+                old_new_enclosing_pairs)
+            for (name in names(active_copies)) {
+                makeActiveBinding(name, active_copies[[name]], 
+                  new_slice$binding)
+            }
+            new_slice$enclosing$.__active__ <- active_copies
+        }
+        if (!is.null(old_slice$private)) {
+            private_copies <- as.list.environment(old_slice$private, 
+                all.names = TRUE)
+            if (deep) {
+                private_copies <- mapply(deep_clone, names(private_copies), 
+                  private_copies, SIMPLIFY = FALSE)
+            }
+            private_copies <- remap_func_envs(private_copies, 
+                old_new_enclosing_pairs)
+            list2env2(private_copies, new_slice$private)
+        }
+        if (first_slice) {
+            method_envs <- lapply(old_new_enclosing_pairs, [[, 
+                "new")
+            is_method <- function(f, method_envs) {
+                env <- environment(f)
+                for (i in seq_along(method_envs)) {
+                  if (identical(env, method_envs[[i]])) {
+                    return(TRUE)
+                  }
+                }
+                FALSE
+            }
+            for (name in names(binding_copies)) {
+                if (is_method(new_slice$binding[[name]], method_envs)) 
+                  lockBinding(name, new_slice$binding)
+            }
+            if (has_private) {
+                for (name in names(private_copies)) {
+                  if (is_method(new_slice$private[[name]], method_envs)) 
+                    lockBinding(name, new_slice$private)
+                }
+            }
+        }
+    }
+    old_new_enclosing_pairs <- list()
+    for (i in seq_along(old)) {
+        old_new_enclosing_pairs[[i]] <- list(old = old[[i]]$enclosing, 
+            new = new[[i]]$enclosing)
+    }
+    for (i in seq_along(old)) {
+        copy_slice(old[[i]], new[[i]], old_new_enclosing_pairs[seq.int(i, 
+            length(old))], (i == 1))
+    }
+    if (environmentIsLocked(old_1_binding)) {
+        lockEnvironment(new_1_binding)
+    }
+    if (has_private && environmentIsLocked(old_1_private)) {
+        lockEnvironment(new_1_private)
+    }
+    if (is.function(.subset2(new_1_binding, "finalize"))) {
+        finalizer_wrapper <- function(e) {
+            .subset2(e, "finalize")()
+        }
+        environment(finalizer_wrapper) <- baseenv()
+        reg.finalizer(new_1_binding, finalizer_wrapper, onexit = TRUE)
+    }
+    if (has_private) {
+        if (is.function(.subset2(new_1_private, "finalize"))) {
+            finalizer_wrapper <- function(e) {
+                .subset2(e, ".__enclos_env__")$private$finalize()
+            }
+            environment(finalizer_wrapper) <- baseenv()
+            reg.finalizer(new_1_binding, finalizer_wrapper, onexit = TRUE)
+        }
+    }
+    class(new_1_binding) <- class(old_1_binding)
+    new_1_binding
+})
+=== Population private_methods ===
+NULL
+--- ns func: newSimulation ---
+function (n, initializer = NULL) 
+{
+    .Call(`_ABM_newSimulation`, n, initializer)
+}
+--- ns func: newPopulation ---
+function (n, initializer = NULL) 
+{
+    .Call(`_ABM_newPopulation`, n, initializer)
+}
+--- ns func: newAgent ---
+function (state, death_time = NA_real_) 
+{
+    .Call(`_ABM_newAgent`, state, death_time)
+}
+--- ns func: setState ---
+function (agent, value) 
+{
+    invisible(.Call(`_ABM_setState`, agent, value))
+}
+--- ns func: setStates ---
+function (population, states) 
+{
+    invisible(.Call(`_ABM_setStates`, population, states))
+}
+--- ns func: getState ---
+function (agent) 
+{
+    .Call(`_ABM_getState`, agent)
+}
+--- ns func: matchState ---
+function (agent, rule) 
+{
+    stateMatch(getState(agent), rule)
+}
+--- ns func: newStateLogger ---
+function (name, agent, state) 
+{
+    .Call(`_ABM_newStateLogger`, name, agent, state)
+}
+--- ns func: addTransition ---
+function (sim, from, contact_from, to, contact_to, contact, waiting_time, 
+    to_change_callback = NULL, changed_callback = NULL) 
+{
+    invisible(.Call(`_ABM_addTransition`, sim, from, contact_from, 
+        to, contact_to, contact, waiting_time, to_change_callback, 
+        changed_callback))
+}
+--- ns func: addAgent ---
+function (population, agent) 
+{
+    invisible(.Call(`_ABM_addAgent`, population, agent))
+}
+--- ns func: Event ---
+<environment>
+--- ns func: Agent ---
+<environment>

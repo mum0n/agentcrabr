@@ -1,0 +1,13 @@
+app\.R$ 
+run\.R$ 
+launch\.ps1$ 
+dashboard\.html$ 
+abm_src/ 
+abm_methods\.txt$ 
+check_packages\.R$ 
+error_log\.txt$ 
+.*\.bak$ 
+R/model\.R\.bak$ 
+R/model_backup\.R$ 
+agentcrabr_filelist\.txt$ 
+agentcrabr_ready_check/

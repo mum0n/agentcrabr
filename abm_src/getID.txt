@@ -1,0 +1,6 @@
+function (agent) 
+{
+    .Call(`_ABM_getID`, agent)
+}
+<bytecode: 0x000001f74abbef58>
+<environment: namespace:ABM>
