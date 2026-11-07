@@ -9,7 +9,10 @@ library(mapdata)
 
 options(shiny.sanitize.errors = FALSE)
 
-library(agentcrabr)
+model_candidates <- c("R/model.R", "../../R/model.R", "../R/model.R")
+model_path <- model_candidates[file.exists(model_candidates)][1]
+if (is.na(model_path)) stop("Unable to locate R/model.R from the application directory.")
+source(model_path)
 
 ui <- fluidPage(
   titlePanel("agentcrabr - Crab Agent-Based Model (TethysBio-faithful)"),
@@ -27,8 +30,8 @@ ui <- fluidPage(
         h4("Location Selection (click map)"),
         plotOutput("loc_map", height = "250px", click = "map_click"),
         fluidRow(
-          column(6, numericInput("inp_lon", "Longitude", -63.5, min = -66.5, max = -57.5, step = 0.01)),
-          column(6, numericInput("inp_lat", "Latitude", 44.5, min = 42.0, max = 48.5, step = 0.01))
+          column(6, numericInput("inp_lon", "Longitude", -60, min = -66.5, max = -57.5, step = 0.01)),
+          column(6, numericInput("inp_lat", "Latitude", 45, min = 42.0, max = 48.5, step = 0.01))
         ),
         div(style = "font-size: 11px; color: #64748b;", textOutput("coord_display"))
       ),
@@ -262,7 +265,7 @@ server <- function(input, output, session) {
                    fill = "grey70", color = "grey30", linewidth = 0.3) +
       geom_point(aes(x = input$inp_lon, y = input$inp_lat), color = "red", size = 3) +
       coord_cartesian(xlim = c(-67, -57), ylim = c(41.5, 49)) +
-      labs(x = "Longitude", y = "Latitude", title = "Study Area (click to select)") +
+      labs(x = "Longitude", y = "Latitude", title = "Area of Interest (AOI) Selection") +
       theme_minimal() + theme(legend.position = "right")
   })
 
@@ -407,7 +410,7 @@ server <- function(input, output, session) {
     tryCatch({
       sizes <- seq(20, 160, by = 1)
       mat_m <- compute_maturity_ogive(sizes, as.numeric(input$inp_maturity_l50_m), 6.9957)
-      mat_f <- compute_maturity_ogive(sizes, as.numeric(input$inp_maturity_l50_f), 12.9812)
+      mat_f <- compute_maturity_ogive(sizes, as.numeric(input$inp_maturity_l50_f), as.numeric(input$inp_maturity_slope_f))
       sel <- compute_selectivity(sizes, as.numeric(input$inp_legal_size), 5.0)
       plot_ly(x = sizes) %>%
         add_lines(y = mat_m, name = "Maturity (Male)", line = list(color = "#2980b9")) %>%

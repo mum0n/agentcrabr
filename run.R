@@ -1,5 +1,8 @@
-# Launcher script for agentcrabr Shiny app
-app_dir <- "C:/Users/Nathalie/projects/agentcrabr"
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+app_dir <- if (length(script_arg)) {
+  dirname(normalizePath(sub("^--file=", "", script_arg[[1]]), winslash = "/", mustWork = TRUE))
+} else {
+  normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+}
 setwd(app_dir)
-source(file.path(app_dir, "R", "model.R"))
-shiny::runApp(file.path(app_dir, "app.R"), port = 3840, launch.browser = TRUE)
+shiny::runApp(app_dir, port = 3840, launch.browser = TRUE)

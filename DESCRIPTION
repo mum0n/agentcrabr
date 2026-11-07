@@ -12,7 +12,11 @@ Imports:
     shiny,
     ggplot2,
     dplyr,
-    tidyr
+    tidyr,
+    plotly,
+    DT,
+    maps,
+    mapdata
 Suggests:
     testthat
 RoxygenNote: 7.0.0

@@ -15,7 +15,7 @@ ABM package, with an interactive Shiny dashboard for visualization.
 
 `
 # Install dependencies
-install.packages(c("ABM", "shiny", "ggplot2", "dplyr", "tidyr"))
+install.packages(c("ABM", "shiny", "ggplot2", "dplyr", "tidyr", "plotly", "DT", "maps", "mapdata"))
 `
 
 ## Usage
