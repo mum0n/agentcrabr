@@ -1,7 +1,6 @@
 # Launcher for agentcrabr Shiny app
-# Double-click or run: powershell -File launch.ps1
+# Run from PowerShell: .\launch.ps1
 
-$Rscript = "C:\Program Files\R\R-4.6.1\bin\Rscript.exe"
-$AppDir = "C:\Users\Nathalie\projects\agentcrabr"
+$AppDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 Set-Location $AppDir
-& $Rscript -e "shiny::runApp('$AppDir/app.R', port=3840, launch.browser=TRUE)"
+Rscript "$AppDir/run.R"
