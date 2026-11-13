@@ -368,8 +368,11 @@ server <- function(input, output, session) {
   # Reactive simulation state
   current_day <- reactiveVal(0)
   is_running <- reactiveVal(FALSE)
+  tick <- reactiveVal(0)
   sim_model <- reactiveVal(NULL)
   sim_history <- reactiveVal(data.frame())
+  sim_positions <- reactiveVal(data.frame())
+  selected_stage <- reactiveVal(NULL)
   annual_records <- reactiveVal(data.frame())
   exclusion_box <- reactiveVal(NULL)
 
@@ -377,11 +380,14 @@ server <- function(input, output, session) {
   observe({
     sim <- create_crab_simulation(120, list(
       benthic_carrying_capacity_density = 6000.0,
-      grid_size = 50
+      grid_size = 50,
+      unit_meters = 1000.0
     ))
     sim_model(sim)
     df <- run_crab_simulation(sim, 0:1)
     sim_history(df)
+    sim_positions(crab_agent_positions(sim))
+    current_day(1)
   })
 
   # Presets observer
@@ -413,14 +419,48 @@ server <- function(input, output, session) {
 
   # Transport Actions
   observeEvent(input$btn_start, { is_running(TRUE) })
+
+  # Auto-advance simulation while running (timer-driven to avoid reactive loops)
+  auto_timer <- reactiveTimer(200)
+  observe({
+    auto_timer()
+    if (is_running()) {
+      tryCatch({
+        d_step <- as.integer(input$step_days)
+        new_day <- current_day() + d_step
+        current_day(new_day)
+        sim <- sim_model()
+        if (!is.null(sim)) {
+          df <- run_crab_simulation(sim, seq(new_day - d_step, new_day, by = 1))
+          sim_history(rbind(sim_history(), df))
+          sim_positions(crab_agent_positions(sim))
+          tick(tick() + 1)
+        }
+        horizon <- as.numeric(input$duration_years) * 365
+        if (new_day >= horizon) {
+          is_running(FALSE)
+          showNotification("Simulation horizon reached.", type = "message", duration = 6)
+        }
+      }, error = function(e) {
+        is_running(FALSE)
+        showNotification(paste("Simulation error:", conditionMessage(e)), type = "error")
+      })
+    }
+  })
   observeEvent(input$btn_pause, { is_running(FALSE) })
   observeEvent(input$btn_stop, {
     is_running(FALSE)
     current_day(0)
-    sim <- create_crab_simulation(120)
+    sim <- create_crab_simulation(120, list(
+      benthic_carrying_capacity_density = 6000.0,
+      grid_size = 50,
+      unit_meters = 1000.0
+    ))
     sim_model(sim)
     df <- run_crab_simulation(sim, 0:1)
     sim_history(df)
+    sim_positions(crab_agent_positions(sim))
+    current_day(1)
     annual_records(data.frame())
   })
   observeEvent(input$btn_step, {
@@ -430,7 +470,9 @@ server <- function(input, output, session) {
     sim <- sim_model()
     if (!is.null(sim)) {
       df <- run_crab_simulation(sim, seq(new_day - d_step, new_day, by = 1))
-      sim_history(rbind(sim_history(), df[-1, ]))
+      sim_history(rbind(sim_history(), df))
+      sim_positions(crab_agent_positions(sim))
+      tick(tick() + 1)
     }
   })
   observeEvent(input$btn_clear_mpa, {
@@ -490,7 +532,7 @@ server <- function(input, output, session) {
         name = "Depth (m)"
       ) +
       geom_point(data = aoi_pt, aes(x = lon, y = lat), color = "#dc2626", size = 4.5, shape = 21, fill = "#ef4444", stroke = 1.5) +
-      scale_x_reverse(limits = c(-57.0, -67.0), expand = c(0, 0)) +
+      scale_x_continuous(limits = c(-67.0, -57.0), expand = c(0, 0)) +
       scale_y_continuous(limits = c(41.5, 48.5), expand = c(0, 0)) +
       labs(x = "Longitude (°W)", y = "Latitude (°N)") +
       theme_minimal() +
@@ -535,38 +577,68 @@ server <- function(input, output, session) {
       )
   })
 
-  # Tab 2: Spatial Habitat Plotly
+  # Tab 2: Spatial Habitat Plotly — agents mapped into the AOI box over the
+  # Scotian Shelf bathymetry, colored by behavioural state, sized by CW.
   output$spatial_map_plotly <- renderPlotly({
-    pos <- if (exists("last_positions", envir = .GlobalEnv)) {
-      get("last_positions", envir = .GlobalEnv)
-    } else {
-      data.frame(x = runif(30), y = runif(30), size = runif(30, 20, 100),
-                 sex = sample(c("M", "F"), 30, replace = TRUE), mature = "0")
-    }
+    tick()
+    pos <- sim_positions()
+    aoi_lon <- as.numeric(input$inp_lon)
+    aoi_lat <- as.numeric(input$inp_lat)
+    span <- 0.5   # degrees of the domain shown around the AOI centre
 
-    plot_ly() %>%
-      add_markers(
-        data = pos,
-        x = ~x * 1000,
-        y = ~y * 1000,
-        color = ~sex,
-        colors = c("M" = "#1d4ed8", "F" = "#dc2626"),
-        marker = list(size = 6, opacity = 0.85)
-      ) %>%
-      layout(
-        xaxis = list(title = "Grid X (cells)", range = c(0, 1000)),
-        yaxis = list(title = "Grid Y (cells)", range = c(0, 1000)),
-        margin = list(l = 35, r = 15, t = 15, b = 35),
-        showlegend = FALSE
+    living <- pos[!pos$state %in% c("dead", "harvested"), ]
+    if (nrow(living) > 0) {
+      living$map_lon <- aoi_lon + (living$x - 0.5) * span
+      living$map_lat <- aoi_lat + (living$y - 0.5) * span
+      living$marker_size <- pmax(4, living$size / 10)
+    }
+    state_colors <- c(foraging = "#0ea5e9", resting = "#14b8a6",
+                      molting = "#f59e0b", reproducing = "#a855f7")
+
+    mpa <- list(xmin = 0.25, xmax = 0.55, ymin = 0.25, ymax = 0.55)
+    mpa_lon <- c(aoi_lon + (mpa$xmin - 0.5) * span, aoi_lon + (mpa$xmax - 0.5) * span)
+    mpa_lat <- c(aoi_lat + (mpa$ymin - 0.5) * span, aoi_lat + (mpa$ymax - 0.5) * span)
+
+    p <- plot_ly() %>%
+      add_heatmap(
+        data = bathy_raster_df,
+        x = ~lon, y = ~lat, z = ~depth,
+        colorscale = "Blues", reversescale = TRUE,
+        showscale = FALSE, opacity = 0.7
       )
+    if (nrow(living) > 0) {
+      p <- p %>%
+        add_markers(
+          data = living,
+          x = ~map_lon, y = ~map_lat,
+          color = ~state, colors = state_colors,
+          marker = list(size = ~marker_size, opacity = 0.85,
+                        line = list(width = 0.5, color = "#0f172a"))
+        )
+    }
+    p <- p %>%
+      layout(
+        xaxis = list(title = "Longitude (°W)",
+                     range = c(aoi_lon - span / 2, aoi_lon + span / 2)),
+        yaxis = list(title = "Latitude (°N)",
+                     range = c(aoi_lat - span / 2, aoi_lat + span / 2)),
+        shapes = list(list(
+          type = "rect", xref = "x", yref = "y",
+          x0 = mpa_lon[1], x1 = mpa_lon[2], y0 = mpa_lat[1], y1 = mpa_lat[2],
+          line = list(color = "#16a34a", width = 2, dash = "dash"), fillcolor = "transparent"
+        )),
+        margin = list(l = 35, r = 15, t = 15, b = 35)
+      )
+    p
   })
 
   # Tab 2: Abundance Trajectories
   output$pop_abundance_plot <- renderPlotly({
     h <- sim_history()
+    tick()
     if (nrow(h) > 0) {
       plot_ly(data = h, x = ~times) %>%
-        add_lines(y = ~log10(pmax(1, foraging + resting + molting)),
+        add_lines(y = ~log10(pmax(1, foraging + resting + molting + reproducing)),
                   line = list(color = "#0f172a", width = 2), name = "Total Alive") %>%
         add_lines(y = ~log10(pmax(1, mature_male)),
                   line = list(color = "#1d4ed8", width = 1.5), name = "Mature Male") %>%
@@ -574,6 +646,8 @@ server <- function(input, output, session) {
                   line = list(color = "#dc2626", width = 1.5), name = "Mature Female") %>%
         add_lines(y = ~log10(pmax(1, legal_male)),
                   line = list(color = "#16a34a", width = 1.5, dash = "dash"), name = "Legal Male") %>%
+        add_lines(y = ~log10(pmax(1, dead)),
+                  line = list(color = "#94a3b8", width = 1.2, dash = "dot"), name = "Dead") %>%
         layout(
           xaxis = list(title = "Simulation Day"),
           yaxis = list(title = "log10(Abundance)"),
@@ -584,16 +658,29 @@ server <- function(input, output, session) {
     }
   })
 
-  # Tab 2: Environmental Distributions
+  # Tab 2: Environmental Distributions — sampled from the real bathymetry and
+  # seasonal temperature/HSI models inside the AOI box (no synthetic noise).
   output$env_distribution_plot <- renderPlotly({
-    lat <- as.numeric(input$inp_lat)
-    lon <- as.numeric(input$inp_lon)
-    depth <- scotian_shelf_depth(lon, lat)
-    z_vals <- rnorm(200, depth, 15)
-    t_vals <- rnorm(200, 3.2, 0.8)
-    h_vals <- rbeta(200, 5, 2)
+    aoi_lon <- as.numeric(input$inp_lon)
+    aoi_lat <- as.numeric(input$inp_lat)
+    span <- 0.5
+    in_box <- bathy_raster_df$lon >= aoi_lon - span / 2 & bathy_raster_df$lon <= aoi_lon + span / 2 &
+      bathy_raster_df$lat >= aoi_lat - span / 2 & bathy_raster_df$lat <= aoi_lat + span / 2
+    box_df <- bathy_raster_df[in_box & !is.na(bathy_raster_df$depth), ]
+    if (nrow(box_df) > 400) box_df <- box_df[sample.int(nrow(box_df), 400), ]
 
-    p1 <- plot_ly(x = z_vals, type = "histogram", name = "Depth", marker = list(color = "#0284c7")) %>%
+    temp_off <- as.numeric(input$ctrl_temp_offset)
+    temp_mult <- as.numeric(input$ctrl_temp_mult)
+    hsi_off <- as.numeric(input$ctrl_hsi_offset)
+    hsi_mult <- as.numeric(input$ctrl_hsi_mult)
+    t_vals <- vapply(box_df$depth, function(d) {
+      seasonal_bottom_temperature_cycle(0, d, aoi_lat, temp_off, temp_mult)$temps[1]
+    }, numeric(1))
+    h_vals <- vapply(seq_along(box_df$depth), function(k) {
+      aoi_habitat_suitability(t_vals[k], box_df$depth[k], hsi_off, hsi_mult)
+    }, numeric(1))
+
+    p1 <- plot_ly(x = box_df$depth, type = "histogram", name = "Depth", marker = list(color = "#0284c7")) %>%
       layout(xaxis = list(title = "Depth (m)"))
     p2 <- plot_ly(x = t_vals, type = "histogram", name = "Temp", marker = list(color = "#dc2626")) %>%
       layout(xaxis = list(title = "Temp (°C)"))
@@ -604,18 +691,65 @@ server <- function(input, output, session) {
       layout(showlegend = FALSE, margin = list(l = 35, r = 15, t = 15, b = 35))
   })
 
-  # Tab 3: Demographics & Growth
+  # Tab 3: Demographics & Growth — stage structure from live agent sizes.
+  # Clicking a stage (lollipop head) selects that level: it is highlighted
+  # and its detail is shown; clicking it again deselects.
+  instar_mean_cw <- c(2.7, 5.9, 8.9, 12.0, 15.4, 19.2, 23.4, 28.0, 33.2, 39.5, 47.5, 65.0)
+  stage_edges <- (head(instar_mean_cw, -1) + tail(instar_mean_cw, -1)) / 2
+  stage_labels <- c(paste("Instar", 1:11), "Instar 12+")
+  crab_stage_from_cw <- function(cw) as.integer(cut(cw, breaks = c(-Inf, stage_edges, Inf), labels = FALSE))
+
+  stage_click <- event_data("plotly_click", source = "stage_src")
+  observeEvent(stage_click, {
+    cd <- stage_click
+    if (is.null(cd) || nrow(cd) == 0L) return()
+    idx <- suppressWarnings(as.integer(cd$customdata[1]))
+    if (is.na(idx)) return()
+    selected_stage(if (!identical(selected_stage(), idx)) idx else NULL)
+  })
+
   output$stage_structure_plot <- renderPlotly({
-    stages <- c("Instar 1", "Instar 2", "Instar 3", "Instar 4", "Instar 5",
-                "Instar 6", "Instar 7", "Instar 8", "Instar 9", "Instar 10",
-                "Instar 11", "Instar 12+")
-    counts <- c(35, 28, 22, 18, 15, 12, 10, 8, 7, 5, 4, 3)
-    plot_ly(x = stages, y = counts, type = "bar", marker = list(color = "#0284c7")) %>%
+    tick()
+    pos <- sim_positions()
+    if (nrow(pos) > 0) {
+      pos$stage_f <- factor(crab_stage_from_cw(pos$size), levels = seq_along(stage_labels))
+      counts <- table(pos$stage_f, pos$sex)
+      male_counts <- as.integer(counts[, "M"])
+      female_counts <- as.integer(counts[, "F"])
+    } else {
+      male_counts <- rep(0L, length(stage_labels))
+      female_counts <- rep(0L, length(stage_labels))
+    }
+    x_pos <- seq_along(stage_labels)
+    offset <- 0.2
+    sel <- selected_stage()
+
+    male_color <- ifelse(x_pos == sel, "#f59e0b", "#0284c7")
+    female_color <- ifelse(x_pos == sel, "#f59e0b", "#dc2626")
+
+    p <- plot_ly() %>%
+      add_segments(x = x_pos - offset, xend = x_pos - offset, y = 0, yend = male_counts,
+                   line = list(color = male_color, width = 2), name = "Males", showlegend = FALSE) %>%
+      add_markers(x = x_pos - offset, y = male_counts, customdata = x_pos,
+                  marker = list(color = male_color, size = 8, line = list(width = 0.5, color = "#ffffff")),
+                  name = "Males") %>%
+      add_segments(x = x_pos + offset, xend = x_pos + offset, y = 0, yend = female_counts,
+                   line = list(color = female_color, width = 2), name = "Females", showlegend = FALSE) %>%
+      add_markers(x = x_pos + offset, y = female_counts, customdata = x_pos,
+                  marker = list(color = female_color, size = 8, line = list(width = 0.5, color = "#ffffff")),
+                  name = "Females") %>%
+      event_register("plotly_click", source = "stage_src") %>%
       layout(
-        xaxis = list(tickangle = -45),
+        xaxis = list(tickvals = x_pos, ticktext = stage_labels, tickangle = -45),
         yaxis = list(title = "Abundance"),
         margin = list(l = 45, r = 15, t = 15, b = 65)
       )
+    if (!is.null(sel)) {
+      p <- p %>%
+        layout(title = sprintf("%s — %d males, %d females (click again to clear)",
+                               stage_labels[sel], male_counts[sel], female_counts[sel]))
+    }
+    p
   })
 
   output$maturity_ogive_plot <- renderPlotly({
@@ -633,78 +767,118 @@ server <- function(input, output, session) {
   })
 
   output$size_frequency_plot <- renderPlotly({
-    pos <- if (exists("last_positions", envir = .GlobalEnv)) {
-      get("last_positions", envir = .GlobalEnv)
+    tick()
+    pos <- sim_positions()
+    if (nrow(pos) == 0) {
+      plot_ly() %>% layout(title = "No agents yet — run the simulation")
     } else {
-      data.frame(size = runif(50, 20, 140), sex = sample(c("M", "F"), 50, replace = TRUE))
+      plot_ly() %>%
+        add_histogram(data = pos[pos$sex == "M", ], x = ~size, name = "Males",
+                      marker = list(color = "rgba(29, 78, 216, 0.7)")) %>%
+        add_histogram(data = pos[pos$sex == "F", ], x = ~size, name = "Females",
+                      marker = list(color = "rgba(220, 38, 38, 0.7)")) %>%
+        layout(
+          barmode = "overlay",
+          xaxis = list(title = "Carapace Width (mm)", range = c(0, 165)),
+          yaxis = list(title = "Count"),
+          shapes = list(
+            list(type = "line", x0 = 95, x1 = 95, y0 = 0, y1 = 1, yref = "paper",
+                 line = list(color = "#16a34a", width = 2, dash = "dash"))
+          ),
+          margin = list(l = 45, r = 15, t = 15, b = 35)
+        )
     }
-    plot_ly() %>%
-      add_histogram(data = pos[pos$sex == "M", ], x = ~size, name = "Males",
-                    marker = list(color = "rgba(29, 78, 216, 0.7)")) %>%
-      add_histogram(data = pos[pos$sex == "F", ], x = ~size, name = "Females",
-                    marker = list(color = "rgba(220, 38, 38, 0.7)")) %>%
-      layout(
-        barmode = "overlay",
-        xaxis = list(title = "Carapace Width (mm)", range = c(0, 165)),
-        yaxis = list(title = "Count"),
-        shapes = list(
-          list(type = "line", x0 = 95, x1 = 95, y0 = 0, y1 = 1, yref = "paper",
-               line = list(color = "#16a34a", width = 2, dash = "dash"))
-        ),
-        margin = list(l = 45, r = 15, t = 15, b = 35)
-      )
   })
 
   output$cw_distribution_plot <- renderPlotly({
-    pos <- if (exists("last_positions", envir = .GlobalEnv)) {
-      get("last_positions", envir = .GlobalEnv)
+    tick()
+    pos <- sim_positions()
+    if (nrow(pos) == 0) {
+      plot_ly() %>% layout(title = "No agents yet — run the simulation")
     } else {
-      data.frame(size = runif(50, 20, 140))
+      plot_ly(data = pos, x = ~size, type = "histogram", marker = list(color = "#6366f1")) %>%
+        layout(
+          xaxis = list(title = "Carapace Width (mm)"),
+          yaxis = list(title = "Frequency"),
+          margin = list(l = 45, r = 15, t = 15, b = 35)
+        )
     }
-    plot_ly(data = pos, x = ~size, type = "histogram", marker = list(color = "#6366f1")) %>%
-      layout(
-        xaxis = list(title = "Carapace Width (mm)"),
-        yaxis = list(title = "Frequency"),
-        margin = list(l = 45, r = 15, t = 15, b = 35)
-      )
   })
 
-  # Tab 4: Macro Models
+  # Tab 4: Macro Models — driven by the simulation history
   output$stock_recruitment_plot <- renderPlotly({
-    spawners <- c(15, 25, 35, 45, 60)
-    recruits <- c(20, 32, 42, 48, 52)
-    plot_ly(x = spawners, y = recruits, type = "scatter", mode = "markers",
-            marker = list(size = 9, color = "#1d4ed8"), name = "Observed") %>%
-      layout(
-        xaxis = list(title = "Spawning Stock Biomass (SSB)"),
-        yaxis = list(title = "Recruitment (R)"),
-        margin = list(l = 45, r = 15, t = 15, b = 35)
-      )
+    h <- sim_history()
+    tick()
+    if (nrow(h) < 2) {
+      plot_ly() %>% layout(title = "No history available")
+    } else {
+      plot_ly(data = h, x = ~times) %>%
+        add_lines(y = ~mature_female, line = list(color = "#dc2626", width = 2),
+                  name = "Spawning stock (mature females)") %>%
+        add_lines(y = ~mature_male, line = list(color = "#1d4ed8", width = 1.5, dash = "dash"),
+                  name = "Mature males") %>%
+        layout(
+          xaxis = list(title = "Simulation Day"),
+          yaxis = list(title = "Abundance"),
+          annotations = list(list(
+            text = "Recruitment not modelled (closed cohort)",
+            xref = "paper", yref = "paper", x = 0.02, y = 0.95,
+            showarrow = FALSE, font = list(size = 11, color = "#64748b")
+          )),
+          margin = list(l = 45, r = 15, t = 15, b = 35)
+        )
+    }
   })
 
   output$macro_fits_plot <- renderPlotly({
-    yrs <- 1:3
-    bio <- c(45.2, 52.1, 48.7)
-    catches <- c(7.8, 9.4, 8.2)
-    plot_ly() %>%
-      add_lines(x = yrs, y = bio, line = list(color = "#1d4ed8", width = 2), name = "Survey Biomass (kg)") %>%
-      add_bars(x = yrs, y = catches, marker = list(color = "rgba(220, 38, 38, 0.6)"), name = "Catch (kg)") %>%
-      layout(
-        xaxis = list(title = "Year"),
-        yaxis = list(title = "Mass (kg)"),
-        margin = list(l = 45, r = 15, t = 15, b = 35)
-      )
+    h <- sim_history()
+    tick()
+    if (nrow(h) < 2) {
+      plot_ly() %>% layout(title = "No history available")
+    } else {
+      pos <- sim_positions()
+      mean_mass <- if (nrow(pos) > 0) {
+        mean(mapply(calculate_crab_mass_kg, pos$size, pos$sex, pos$mature == "1"))
+      } else 0.24
+      h$year <- ceiling(h$times / 365)
+      annual <- do.call(rbind, lapply(split(h, h$year), function(g) {
+        g[nrow(g), , drop = FALSE]
+      }))
+      plot_ly(data = annual, x = ~year) %>%
+        add_lines(y = ~(foraging + resting + molting + reproducing) * mean_mass,
+                  line = list(color = "#1d4ed8", width = 2), name = "Survey biomass (kg)") %>%
+        add_bars(y = ~harvested * mean_mass, marker = list(color = "rgba(220, 38, 38, 0.6)"),
+                 name = "Catch (kg)") %>%
+        layout(
+          xaxis = list(title = "Year", tickvals = annual$year, tickformat = "d"),
+          yaxis = list(title = "Mass (kg)"),
+          margin = list(l = 45, r = 15, t = 15, b = 35)
+        )
+    }
   })
 
   output$annual_summary_table <- renderDT({
-    df <- data.frame(
-      Year = c("Year 1", "Year 2"),
-      Biomass_kg = c(45.2, 52.1),
-      Catch_kg = c(7.8, 9.4),
-      Exploit_Rate = c("17.3%", "18.0%"),
-      Recruits = c(22L, 26L),
-      Spawners = c(18L, 21L)
-    )
+    h <- sim_history()
+    tick()
+    if (nrow(h) < 2) {
+      df <- data.frame(Year = character(0), End_Day = numeric(0), Alive = integer(0),
+                       Harvested = integer(0), Mature_Females = integer(0),
+                       Legal_Males = integer(0), Exploit_Rate = character(0))
+    } else {
+      h$year <- ceiling(h$times / 365)
+      rows <- lapply(split(h, h$year), function(g) {
+        last <- g[nrow(g), ]
+        alive <- last$foraging + last$resting + last$molting + last$reproducing
+        exploited <- if (alive + last$harvested > 0) {
+          sprintf("%.1f%%", 100 * last$harvested / (alive + last$harvested))
+        } else "0.0%"
+        data.frame(Year = paste("Year", last$year), End_Day = last$times,
+                   Alive = alive, Harvested = last$harvested,
+                   Mature_Females = last$mature_female, Legal_Males = last$legal_male,
+                   Exploit_Rate = exploited)
+      })
+      df <- do.call(rbind, rows)
+    }
     datatable(df, options = list(dom = "t", paging = FALSE), rownames = FALSE)
   })
 }

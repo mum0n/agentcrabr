@@ -4,6 +4,11 @@
 
 library(ABM)
 
+# Side-channel for slowly-varying population quantities (live measured-crab
+# count) shared with transition callbacks. It is refreshed at every
+# run_crab_simulation() snapshot, avoiding per-event reentrant agent reads.
+.crab_cache <- new.env(parent = emptyenv())
+
 #' Determine if an organism belongs to the empirically measured size fraction
 #'
 #' Evaluates whether a crab agent belongs to the surveyed benthic size fraction
@@ -258,15 +263,16 @@ create_crab_simulation <- function(n_crabs = 50, params = list()) {
     # Energy
     energy_init = 10.0,
     energy_max = 20.0,
-    energy_gain_foraging = 0.3,
+    energy_gain_foraging = 0.6,
     energy_cost_resting = 0.05,
-    energy_cost_molting = 3.0,
+    energy_cost_molting = 1.0,
     # Rates
     foraging_rate = 0.5,
     resting_rate = 0.3,
     molting_rate = 0.05,
     mortality_rate = 0.002,
     repro_rate = 0.1,
+    move_step = 0.03,
     # Fishing
     fishing_probability = 0.002,
     fishing_season_start = 90,
@@ -304,42 +310,67 @@ create_crab_simulation <- function(n_crabs = 50, params = list()) {
     )
   })
 
-  # Foraging -> Resting
+  # ABM events are scheduled on state entry and NOT cancelled on state exit,
+  # and rules are not re-checked when a stale event fires. Every transition
+  # therefore carries a source-state guard so stale events are ignored.
+  still_in <- function(expected) {
+    force(expected)
+    function(time, agent) identical(getState(agent)$state, expected)
+  }
+
+  # Foraging -> Resting (rate semantics: newExpWaitingTime takes a per-day rate)
   sim$addTransition(
     list(state = "foraging") -> list(state = "resting"),
-    newExpWaitingTime(1 / p$resting_rate),
+    newExpWaitingTime(p$resting_rate),
+    to_change_callback = still_in("foraging"),
     changed_callback = function(time, agent) {
       st <- getState(agent)
       new_energy <- max(0, st$energy - p$energy_cost_resting)
-      mat_prob <- compute_maturity_probability(st$size, st$sex, 4.0)
-      new_mature <- if (st$mature == "1") "1" else if (runif(1) < mat_prob) "1" else "0"
-      new_legal <- if (st$sex == "M" && new_mature == "1" && st$size >= p$legal_size_male) "1" else "0"
-      new_measured <- if (st$size >= 35.0 || new_mature == "1") "1" else "0"
-      setState(agent, list(
-        energy = new_energy,
-        mature = new_mature,
-        legal = new_legal,
-        measured = new_measured
-      ))
+      setState(agent, list(energy = new_energy))
     }
   )
 
-  # Resting -> Foraging
+  # Resting -> Foraging (feeding gain, random-walk movement, mortality roll)
   sim$addTransition(
     list(state = "resting") -> list(state = "foraging"),
-    newExpWaitingTime(1 / p$foraging_rate),
+    newExpWaitingTime(p$foraging_rate),
+    to_change_callback = still_in("resting"),
     changed_callback = function(time, agent) {
       st <- getState(agent)
+      # Mortality is rolled HERE (once per actual feeding resumption) rather
+      # than through dedicated death transitions: ABM events scheduled on
+      # state entry are never cancelled, so a death *transition* would stack
+      # one Exp event per foraging visit and fire repeatedly. Rolling inside
+      # a guarded callback keeps the hazard exactly at the parameterized rate.
+      q_nat <- 1.0 - exp(-as.numeric(p$mortality_rate) / as.numeric(p$foraging_rate))
+      # Density-dependent crowding on the measured fraction, against a cached
+      # live count (refreshed each dashboard snapshot).
+      q_crowd <- 0.0
+      if (identical(st$measured, "1") && K > 0) {
+        n_meas <- if (is.null(.crab_cache$n_meas)) 0L else .crab_cache$n_meas
+        crowd_ratio <- (n_meas / K)^p$benthic_carrying_capacity_exponent
+        if (crowd_ratio > 1.0) {
+          q_crowd <- min(0.8, (crowd_ratio - 1.0) / crowd_ratio)
+        }
+      }
+      if (runif(1) < q_nat || runif(1) < q_crowd) {
+        setState(agent, list(state = "dead"))
+        return()
+      }
       effective_gain <- p$energy_gain_foraging * as.numeric(p$food_availability)
       new_energy <- min(p$energy_max, st$energy + effective_gain)
-      setState(agent, list(energy = new_energy))
+      move <- as.numeric(p$move_step)
+      new_x <- min(1.0, max(0.0, as.numeric(st$x) + if (move > 0) runif(1, -move, move) else 0))
+      new_y <- min(1.0, max(0.0, as.numeric(st$y) + if (move > 0) runif(1, -move, move) else 0))
+      setState(agent, list(energy = new_energy, x = new_x, y = new_y))
     }
   )
 
   # Foraging -> Molting (Hiatt growth formulation)
   sim$addTransition(
     list(state = "foraging") -> list(state = "molting"),
-    newExpWaitingTime(1 / p$molting_rate),
+    newExpWaitingTime(p$molting_rate),
+    to_change_callback = still_in("foraging"),
     changed_callback = function(time, agent) {
       st <- getState(agent)
       if (st$mature == "1") {
@@ -362,10 +393,11 @@ create_crab_simulation <- function(n_crabs = 50, params = list()) {
     }
   )
 
-  # Molting -> Foraging
+  # Molting -> Foraging (recovery ~2 days -> rate 0.5/day)
   sim$addTransition(
     list(state = "molting") -> list(state = "foraging"),
-    newExpWaitingTime(2),
+    newExpWaitingTime(0.5),
+    to_change_callback = still_in("molting"),
     changed_callback = function(time, agent) {
       st <- getState(agent)
       gain_base <- if (st$sex == "M") p$energy_gain_foraging * 0.5 else p$energy_gain_foraging * 0.3
@@ -375,43 +407,16 @@ create_crab_simulation <- function(n_crabs = 50, params = list()) {
     }
   )
 
-  # Foraging -> Dead (starvation, baseline mortality, carrying capacity feedback)
-  sim$addTransition(
-    list(state = "foraging") -> list(state = "dead"),
-    newExpWaitingTime(1 / p$mortality_rate),
-    to_change_callback = function(time, agent) {
-      st <- getState(agent)
-      if (st$energy <= 0) return(TRUE)
-      # Density-dependent quadratic crowding feedback on measured fraction
-      if (identical(st$measured, "1") && K > 0) {
-        if (exists("last_positions", envir = .GlobalEnv)) {
-          pos <- get("last_positions", envir = .GlobalEnv)
-          n_meas <- sum(pos$measured == "1" | pos$measured == 1, na.rm = TRUE)
-          crowd_ratio <- (n_meas / K)^p$benthic_carrying_capacity_exponent
-          if (crowd_ratio > 1.0 && runif(1) < min(0.8, (crowd_ratio - 1.0) / crowd_ratio)) {
-            return(TRUE)
-          }
-        }
-      }
-      FALSE
-    }
-  )
-
-  # Resting -> Dead
-  sim$addTransition(
-    list(state = "resting") -> list(state = "dead"),
-    newExpWaitingTime(1 / (p$mortality_rate * 0.5)),
-    to_change_callback = function(time, agent) {
-      st <- getState(agent)
-      st$energy <= 0
-    }
-  )
+  # Foraging -> Dead and Resting -> Dead transitions are intentionally ABSENT:
+  # stacked never-cancelled events would multiply the death hazard (see the
+  # mortality roll inside the Resting -> Foraging callback above).
 
   # Harvest (commercial fishing) restricted to mature legal males outside active MPA
   sim$addTransition(
     list(state = "foraging", legal = "1") -> list(state = "harvested"),
-    newExpWaitingTime(1 / p$fishing_probability),
+    newExpWaitingTime(p$fishing_probability),
     to_change_callback = function(time, agent) {
+      if (!identical(getState(agent)$state, "foraging")) return(FALSE)
       st <- getState(agent)
       # Check fishing season window (day of year 90 to 150)
       doy <- as.integer(time) %% 365
@@ -432,7 +437,8 @@ create_crab_simulation <- function(n_crabs = 50, params = list()) {
   # Female reproduction (egg production)
   sim$addTransition(
     list(state = "foraging", sex = "F", mature = "1") -> list(state = "reproducing"),
-    newExpWaitingTime(1 / p$repro_rate),
+    newExpWaitingTime(p$repro_rate),
+    to_change_callback = still_in("foraging"),
     changed_callback = function(time, agent) {
       st <- getState(agent)
       fec <- 0.7311 * (st$size^2.725)
@@ -440,10 +446,11 @@ create_crab_simulation <- function(n_crabs = 50, params = list()) {
     }
   )
 
-  # Reproducing -> Foraging
+  # Reproducing -> Foraging (hatch ~2 days -> rate 0.5/day)
   sim$addTransition(
     list(state = "reproducing") -> list(state = "foraging"),
-    newExpWaitingTime(2),
+    newExpWaitingTime(0.5),
+    to_change_callback = still_in("reproducing"),
     changed_callback = function(time, agent) {
       st <- getState(agent)
       setState(agent, list(egg_count = 0))
@@ -462,37 +469,83 @@ create_crab_simulation <- function(n_crabs = 50, params = list()) {
   sim$addLogger(newCounter("legal_male", list(legal = "1")))
   sim$addLogger(newCounter("measured", list(measured = "1")))
 
+  # Seed the live measured-crab count cache used by the crowding feedback.
+  .crab_cache$n_meas <- sum(vapply(seq_len(n_crabs), function(i) {
+    identical(getState(sim$agent(i))$measured, "1")
+  }, logical(1)))
+
   sim
 }
 
-#' Run crab simulation and record agent positions
+#' Extract the current state of every agent in the population
 #'
-#' Advances an ABM simulation over designated time steps, returning summary
-#' time-series and updating `.GlobalEnv$last_positions`.
+#' @param sim An ABM `Simulation` instance.
+#' @return A `data.frame` with columns x, y, state, sex, size, mature, legal,
+#'   measured, energy, age — one row per agent.
+#' @export
+crab_agent_positions <- function(sim) {
+  n <- sim$size
+  out <- vector("list", n)
+  for (i in seq_len(n)) {
+    st <- getState(sim$agent(i))
+    out[[i]] <- data.frame(
+      x = as.numeric(st$x), y = as.numeric(st$y),
+      state = as.character(st$state), sex = as.character(st$sex),
+      size = as.numeric(st$size), mature = as.character(st$mature),
+      legal = as.character(st$legal), measured = as.character(st$measured),
+      energy = as.numeric(st$energy), age = as.numeric(st$age),
+      stringsAsFactors = FALSE
+    )
+  }
+  do.call(rbind, out)
+}
+
+#' Summarize agent positions into dashboard state counters
+#'
+#' Rebuilds the historical ABM-logger column set (times, dead, foraging, ...,
+#' measured) from a live agent dump. The ABM package's own counters accumulate
+#' across repeated `run()` calls, so under the dashboard's chunked stepping
+#' they are not usable as a time series; this recomputes clean snapshots.
+#'
+#' @param positions A `data.frame` from [crab_agent_positions()].
+#' @param time The simulation time of the snapshot.
+#' @return A one-row `data.frame` of state counters.
+#' @export
+crab_state_summary <- function(positions, time) {
+  living <- !positions$state %in% c("dead", "harvested")
+  data.frame(
+    times = as.numeric(time),
+    dead = sum(positions$state == "dead"),
+    foraging = sum(positions$state == "foraging"),
+    harvested = sum(positions$state == "harvested"),
+    legal_male = sum(positions$legal == "1" & living),
+    mature_female = sum(positions$sex == "F" & positions$mature == "1" & living),
+    mature_male = sum(positions$sex == "M" & positions$mature == "1" & living),
+    measured = sum(positions$measured == "1" & living),
+    molting = sum(positions$state == "molting"),
+    reproducing = sum(positions$state == "reproducing"),
+    resting = sum(positions$state == "resting"),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Run crab simulation to the requested times and snapshot the population
+#'
+#' Advances an ABM simulation to `max(times)` and returns ONE summary row
+#' aggregated from live agent states. The agent dump is also stored in
+#' `.GlobalEnv$last_positions` for backward compatibility, but Shiny outputs
+#' should prefer [crab_agent_positions()] called directly on the simulation.
 #'
 #' @param sim An ABM `Simulation` instance.
 #' @param times Numeric vector of evaluation time points.
-#' @return A `data.frame` of logged state counters across time.
+#' @return A one-row `data.frame` of population state counters.
 #' @export
 run_crab_simulation <- function(sim, times = seq(0, 50, by = 1)) {
-  res <- sim$run(times)
-  df <- as.data.frame(res)
-  positions <- data.frame(
-    x = numeric(0), y = numeric(0), state = character(0),
-    sex = character(0), size = numeric(0), mature = character(0),
-    legal = character(0), measured = character(0),
-    stringsAsFactors = FALSE
-  )
-  for (i in seq_len(sim$size)) {
-    ag <- sim$agent(i)
-    st <- getState(ag)
-    positions <- rbind(positions, data.frame(
-      x = st$x, y = st$y, state = st$state,
-      sex = st$sex, size = st$size, mature = as.character(st$mature),
-      legal = as.character(st$legal), measured = as.character(st$measured),
-      stringsAsFactors = FALSE
-    ))
-  }
+  invisible(sim$run(times))
+  positions <- crab_agent_positions(sim)
   assign("last_positions", positions, envir = .GlobalEnv)
-  df
+  # Refresh the cached live measured count for the crowding feedback.
+  .crab_cache$n_meas <- sum(positions$measured == "1" &
+                              !positions$state %in% c("dead", "harvested"))
+  crab_state_summary(positions, max(times))
 }

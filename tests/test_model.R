@@ -1,6 +1,6 @@
 # Unit tests for agentcrabr core model functions and biological rules
 
-source("C:/home/jae/projects/agentcrabr/R/model.R")
+source("C:/Users/Nathalie/projects/agentcrabr/R/model.R")
 
 test_mass_allometry <- function() {
   m_imm <- calculate_crab_mass_kg(50.0, "M", FALSE)
@@ -68,8 +68,14 @@ test_seasonal_temp <- function() {
 test_simulation_run <- function() {
   sim <- create_crab_simulation(15)
   df <- run_crab_simulation(sim, 0:3)
-  stopifnot(nrow(df) == 4)
+  # one clean snapshot row per call, evaluated at the final time
+  stopifnot(nrow(df) == 1)
+  stopifnot(df$times == 3)
   stopifnot("foraging" %in% names(df))
+  alive <- df$foraging + df$resting + df$molting + df$reproducing
+  stopifnot(alive >= 0 && alive <= 15)
+  pos <- crab_agent_positions(sim)
+  stopifnot(nrow(pos) == 15)
   cat("test_simulation_run: PASS\n")
 }
 
