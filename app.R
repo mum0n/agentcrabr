@@ -34,10 +34,21 @@ scotian_shelf_depth <- function(lon, lat) {
   if (!is.null(etopo_grid)) {
     nx <- length(etopo_grid$lons)
     ny <- length(etopo_grid$lats)
-    ix <- pmax(1L, pmin(nx, round(1 + ((lon - (-66.5)) / 9.0) * (nx - 1))))
-    iy <- pmax(1L, pmin(ny, round(1 + ((lat - 42.0) / 6.5) * (ny - 1))))
-    z_val <- etopo_grid$z[cbind(ix, iy)]
-    return(pmax(10.0, pmin(600.0, as.numeric(z_val))))
+    fx <- 1.0 + (lon - etopo_grid$lons[1]) / (etopo_grid$lons[nx] - etopo_grid$lons[1]) * (nx - 1L)
+    fy <- 1.0 + (lat - etopo_grid$lats[1]) / (etopo_grid$lats[ny] - etopo_grid$lats[1]) * (ny - 1L)
+    fx <- pmax(1.0, pmin(as.numeric(nx), fx))
+    fy <- pmax(1.0, pmin(as.numeric(ny), fy))
+    ix0 <- pmin(nx - 1L, as.integer(floor(fx)))
+    iy0 <- pmin(ny - 1L, as.integer(floor(fy)))
+    tx <- fx - ix0
+    ty <- fy - iy0
+    z00 <- as.numeric(etopo_grid$z[cbind(ix0, iy0)])
+    z10 <- as.numeric(etopo_grid$z[cbind(ix0 + 1L, iy0)])
+    z01 <- as.numeric(etopo_grid$z[cbind(ix0, iy0 + 1L)])
+    z11 <- as.numeric(etopo_grid$z[cbind(ix0 + 1L, iy0 + 1L)])
+    z_val <- (1 - tx) * (1 - ty) * z00 + tx * (1 - ty) * z10 +
+      (1 - tx) * ty * z01 + tx * ty * z11
+    return(pmax(10.0, pmin(600.0, z_val)))
   }
   coast_lat <- 43.55 + 0.34 * (lon + 65.5) + 0.14 * sin(1.25 * (lon + 64.0))
   shelf_off <- pmax(0.0, coast_lat - lat)
@@ -57,7 +68,7 @@ bathy_raster_df <- local({
     g$depth <- ifelse(z_raw > 0, pmin(550.0, z_raw), NA_real_)
     g
   } else {
-    lon_seq <- seq(-66.5, -57.5, length.out = 180)
+    lon_seq <- seq(-66.5, -56.5, length.out = 180)
     lat_seq <- seq(42.0, 48.5, length.out = 130)
     g <- expand.grid(lon = lon_seq, lat = lat_seq)
     g$depth <- scotian_shelf_depth(g$lon, g$lat)
@@ -191,37 +202,39 @@ ui <- fluidPage(
   tabsetPanel(
     id = "main_tabs",
 
-    # Tab 1: Controls & AOI Setup
+    # Tab 1: Controls & AOI Setup (80% width, no scroll)
     tabPanel("1. Controls & AOI Setup",
       br(),
-      fluidRow(
-        column(6,
-          div(class = "compact-card",
-            div(class = "card-title",
-                "Scotian Shelf Regional Bathymetry (Click Map to Select AOI)"),
-            plotOutput("loc_map", height = "360px", click = "map_click"),
-            div(style = "margin-top: 8px; background: #f8fafc; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1;",
-              div(style = "display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; margin-bottom: 6px;",
-                span("Selected: ", strong(textOutput("coord_display", inline = TRUE))),
-                span(textOutput("env_summary", inline = TRUE))
-              ),
-              div(style = "display: flex; gap: 8px; align-items: center; font-size: 11px;",
-                span("Coordinates:"),
-                numericInput("inp_lon", "Lon (°W)", -59.0, min = -66.5, max = -57.5, step = 0.1, width = "80px"),
-                numericInput("inp_lat", "Lat (°N)", 45.0, min = 42.0, max = 48.5, step = 0.1, width = "80px"),
-                span("Presets:", style = "margin-left: 6px;"),
-                actionButton("pre_laurentian", "Laurentian", class = "preset-btn"),
-                actionButton("pre_sable", "Sable Bank", class = "preset-btn"),
-                actionButton("pre_banquereau", "Banquereau", class = "preset-btn"),
-                actionButton("pre_emerald", "Emerald", class = "preset-btn")
+      div(style = "width: 80%; margin: 0 auto;",
+        fluidRow(
+          column(6,
+            div(class = "compact-card",
+              div(class = "card-title",
+                  "Scotian Shelf Regional Bathymetry (Click Map to Select AOI)"),
+              plotOutput("loc_map", height = "300px", click = "map_click"),
+              div(style = "margin-top: 6px; background: #f8fafc; padding: 6px 8px; border-radius: 6px; border: 1px solid #cbd5e1;",
+                div(style = "display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; margin-bottom: 4px;",
+                  span("Selected: ", strong(textOutput("coord_display", inline = TRUE))),
+                  span(textOutput("env_summary", inline = TRUE))
+                ),
+                div(style = "display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11px;",
+                  span("Coordinates:"),
+                  numericInput("inp_lon", "Lon (°W)", -59.0, min = -66.5, max = -56.5, step = 0.1, width = "80px"),
+                  numericInput("inp_lat", "Lat (°N)", 45.0, min = 42.0, max = 48.5, step = 0.1, width = "80px"),
+                  span("Presets:", style = "margin-left: 6px;"),
+                  actionButton("pre_laurentian", "Laurentian", class = "preset-btn"),
+                  actionButton("pre_sable", "Sable Bank", class = "preset-btn"),
+                  actionButton("pre_banquereau", "Banquereau", class = "preset-btn"),
+                  actionButton("pre_emerald", "Emerald", class = "preset-btn")
+                )
               )
             )
-          )
-        ),
-        column(6,
-          div(class = "compact-card",
-            div(class = "card-title", "Seasonal Bottom Temperature Climatology"),
-            plotlyOutput("temp_climatology_plot", height = "420px")
+          ),
+          column(6,
+            div(class = "compact-card",
+              div(class = "card-title", "Seasonal Bottom Temperature Climatology"),
+              plotlyOutput("temp_climatology_plot", height = "355px")
+            )
           )
         )
       )
@@ -241,47 +254,18 @@ ui <- fluidPage(
             div(style = "display: flex; justify-content: center;",
               plotlyOutput("spatial_map_plotly", height = "420px", width = "420px")
             ),
-            div(style = "display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 11px;",
-              span(textOutput("exclusion_readout", inline = TRUE)),
-              actionButton("btn_clear_mpa", "Clear MPA", class = "preset-btn")
-            )
-          ),
-
-          div(class = "compact-card",
-            fluidRow(
-              column(6,
-                div(style = "font-size: 11.5px; font-weight: 700; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin-bottom: 6px;",
-                    "Simulation & Environmental Controls"),
-                numericInput("ctrl_grid", "Grid Resolution (cells)", 1000, min = 50, max = 2000, step = 50),
-                numericInput("ctrl_unit", "Grid Cell Unit / Cell Size (m)", 1.0, min = 0.1, max = 100.0, step = 0.5),
-                numericInput("ctrl_temp_offset", "Base Bottom Temp Offset (°C)", 0.0, min = -5.0, max = 5.0, step = 0.5),
-                numericInput("ctrl_temp_mult", "Seasonal Temp Multiplier", 1.0, min = 0.1, max = 3.0, step = 0.1),
-                numericInput("ctrl_hsi_offset", "Habitat Suitability Offset", 0.0, min = -1.0, max = 1.0, step = 0.05),
-                numericInput("ctrl_hsi_mult", "Habitat Multiplier", 1.0, min = 0.1, max = 3.0, step = 0.1),
-                numericInput("ctrl_food", "Food Availability Multiplier", 1.0, min = 0.1, max = 5.0, step = 0.05),
-                numericInput("ctrl_capacity", "Carrying Capacity Density (/km²)", 6000.0, min = 500, max = 30000, step = 500),
-                selectInput("ctrl_layer", "Spatial Background Layer",
+            div(style = "display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding: 4px 8px; background: #f8fafc; border-radius: 4px; border: 1px solid #e2e8f0; font-size: 11px;",
+              div(style = "display: flex; align-items: center; gap: 6px;",
+                span(style = "font-weight: 600; color: #334155;", "Background Layer:"),
+                selectInput("ctrl_layer", NULL,
                             choices = c("Seabed Depth (m)" = "depth",
                                         "Bottom Temp (°C)" = "temp",
-                                        "Habitat Suitability" = "hsi"),
-                            selected = "depth")
+                                        "Habitat Suitability (HSI)" = "hsi"),
+                            selected = "depth", width = "170px")
               ),
-              column(6,
-                div(style = "font-size: 11.5px; font-weight: 700; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin-bottom: 6px;",
-                    "Commercial Fishing Activity"),
-                numericInput("ctrl_fish_start", "Harvest Window Start (day)", 90, min = 1, max = 365, step = 1),
-                numericInput("ctrl_fish_end", "Harvest Window End (day)", 150, min = 1, max = 365, step = 1),
-                numericInput("ctrl_fish_f", "Daily Fishing Rate F (d⁻¹)", 0.002, min = 0.0001, max = 0.05, step = 0.0005),
-                numericInput("ctrl_fish_size", "Minimum Legal CW (mm)", 95.0, min = 70.0, max = 120.0, step = 1.0),
-
-                div(style = "font-size: 11.5px; font-weight: 700; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin: 8px 0 6px 0;",
-                    "Biological Processes"),
-                checkboxInput("tog_energetics", "Energetics", value = TRUE),
-                checkboxInput("tog_thermal", "Thermal Stress", value = TRUE),
-                checkboxInput("tog_cannibalism", "Cannibalism", value = FALSE),
-                checkboxInput("tog_senescence", "Senescence", value = TRUE),
-                checkboxInput("tog_movement", "Movement", value = TRUE),
-                checkboxInput("tog_repro", "Reproduction", value = TRUE)
+              div(style = "display: flex; align-items: center; gap: 8px;",
+                span(textOutput("exclusion_readout", inline = TRUE)),
+                actionButton("btn_clear_mpa", "Clear exclusion zone", class = "preset-btn")
               )
             )
           )
@@ -290,11 +274,122 @@ ui <- fluidPage(
         column(6,
           div(class = "compact-card",
             div(class = "card-title", "Population Abundance Trajectories"),
-            plotlyOutput("pop_abundance_plot", height = "360px")
+            plotlyOutput("pop_abundance_plot", height = "250px")
           ),
           div(class = "compact-card",
             div(class = "card-title", "Environmental Distributions"),
-            plotlyOutput("env_distribution_plot", height = "240px")
+            plotlyOutput("env_distribution_plot", height = "210px")
+          )
+        )
+      ),
+
+      # Full-Width 4-Column Grouped Controls at Bottom of Tab 2 with Hover Tooltips
+      fluidRow(
+        column(12,
+          div(class = "compact-card", style = "background: #f8fafc;",
+            fluidRow(
+              column(3,
+                div(style = "background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;",
+                  div(style = "font-size: 12px; font-weight: 700; color: #1e3a8a; border-bottom: 2px solid #cbd5e1; padding-bottom: 4px; margin-bottom: 8px;",
+                      "Grid & Spatial Habitat"),
+                  div(title = "Number of grid cells along each axis of the spatial simulation domain.", style = "cursor: help;",
+                    numericInput("ctrl_grid", "Grid Resolution (cells)", 1000, min = 50, max = 2000, step = 50)
+                  ),
+                  div(title = "Physical width of each grid cell in meters; scales movement step size and domain area.", style = "cursor: help;",
+                    numericInput("ctrl_unit", "Grid Unit / Cell Size (m)", 1.0, min = 0.1, max = 100.0, step = 0.5)
+                  ),
+                  div(title = "Optimal seabed depth (m) for benthic snow crab habitat suitability (HSI = 1 peak; open-ended deeper).", style = "cursor: help;",
+                    numericInput("ctrl_depth_opt", "Depth Opt (m)", 200.0, min = 25.0, max = 1000.0, step = 10.0)
+                  ),
+                  div(title = "Gaussian width (m) of the shallow depth suitability taper below Depth Opt.", style = "cursor: help;",
+                    numericInput("ctrl_depth_sigma", "Depth Sigma (m)", 100.0, min = 10.0, max = 500.0, step = 10.0)
+                  ),
+                  div(title = "Maximum annual movement budget (m/yr) converted into daily habitat taxis step distance.", style = "cursor: help;",
+                    numericInput("ctrl_max_move", "Max Movement (m/yr)", 7300.0, min = 0.0, max = 50000.0, step = 500.0)
+                  )
+                )
+              ),
+              column(3,
+                div(style = "background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;",
+                  div(style = "font-size: 12px; font-weight: 700; color: #1e3a8a; border-bottom: 2px solid #cbd5e1; padding-bottom: 4px; margin-bottom: 8px;",
+                      "Thermal Environment"),
+                  div(title = "Constant temperature shift (°C) added to the seasonal bottom temperature climatology.", style = "cursor: help;",
+                    numericInput("ctrl_temp_offset", "Base Bottom Temp Offset (°C)", 0.0, min = -5.0, max = 5.0, step = 0.5)
+                  ),
+                  div(title = "Scaling factor applied to the seasonal bottom temperature amplitude.", style = "cursor: help;",
+                    numericInput("ctrl_temp_mult", "Seasonal Temp Multiplier", 1.0, min = 0.1, max = 3.0, step = 0.1)
+                  ),
+                  div(title = "Lower temperature bound (°C) where thermal habitat suitability tapers to zero.", style = "cursor: help;",
+                    numericInput("ctrl_temp_pref_min", "Temp Pref Min (°C)", -1.5, min = -5.0, max = 15.0, step = 0.5)
+                  ),
+                  div(title = "Optimal bottom temperature (°C) for peak thermal habitat suitability.", style = "cursor: help;",
+                    numericInput("ctrl_temp_pref_opt", "Temp Pref Opt (°C)", 5.0, min = -2.0, max = 20.0, step = 0.5)
+                  ),
+                  div(title = "Upper exclusion temperature (°C) above which thermal habitat suitability is zero.", style = "cursor: help;",
+                    numericInput("ctrl_temp_pref_max", "Temp Pref Max (°C)", 10.0, min = 0.0, max = 25.0, step = 0.5)
+                  )
+                )
+              ),
+              column(3,
+                div(style = "background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;",
+                  div(style = "font-size: 12px; font-weight: 700; color: #1e3a8a; border-bottom: 2px solid #cbd5e1; padding-bottom: 4px; margin-bottom: 8px;",
+                      "Habitat & Carrying Capacity"),
+                  div(title = "Additive offset applied to computed cell Habitat Suitability Index (HSI).", style = "cursor: help;",
+                    numericInput("ctrl_hsi_offset", "Habitat Suitability Offset", 0.0, min = -1.0, max = 1.0, step = 0.05)
+                  ),
+                  div(title = "Multiplicative scaling factor applied to cell Habitat Suitability Index (HSI).", style = "cursor: help;",
+                    numericInput("ctrl_hsi_mult", "Habitat Multiplier", 1.0, min = 0.1, max = 3.0, step = 0.1)
+                  ),
+                  div(title = "Scaling multiplier for benthic food availability driving bioenergetic intake and taxis.", style = "cursor: help;",
+                    numericInput("ctrl_food", "Food Availability Multiplier", 1.0, min = 0.1, max = 5.0, step = 0.05)
+                  ),
+                  div(title = "Reference benthic carrying capacity (Total No./km²) for the empirically measured size fraction (instars 8+, stage ≥ 11, CW ≥ 35 mm, and mature crabs); regulates density-dependent baseline mortality when abundance exceeds K.", style = "cursor: help;",
+                    numericInput("ctrl_capacity", "Carrying Capacity (Total No./km²)", 6000.0, min = 500, max = 30000, step = 500)
+                  ),
+                  div(title = "Local crowding box width B in grid cells (0 = auto 1/5 of grid resolution). Triggers elevated crowding mortality and dispersal when local density exceeds carrying capacity.", style = "cursor: help;",
+                    numericInput("ctrl_crowding_box", "Crowding Box B (cells, 0=G/5)", 0, min = 0, max = 2000, step = 10)
+                  )
+                )
+              ),
+              column(3,
+                div(style = "background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;",
+                  div(style = "font-size: 12px; font-weight: 700; color: #1e3a8a; border-bottom: 2px solid #cbd5e1; padding-bottom: 4px; margin-bottom: 8px;",
+                      "Commercial Fishery"),
+                  div(title = "Day of year (1–365) when the commercial snow crab fishing season opens.", style = "cursor: help;",
+                    numericInput("ctrl_fish_start", "Fishing Start (Day)", 90, min = 1, max = 365, step = 1)
+                  ),
+                  div(title = "Day of year (1–365) when the commercial snow crab fishing season closes.", style = "cursor: help;",
+                    numericInput("ctrl_fish_end", "Fishing End (Day)", 150, min = 1, max = 365, step = 1)
+                  ),
+                  div(title = "Target finite annual harvest rate (0–0.99), rescaled internally to a daily fishing hazard over the active fishing season.", style = "cursor: help;",
+                    numericInput("ctrl_fish_f", "Annual Harvest Rate", 0.0, min = 0.0, max = 0.99, step = 0.01)
+                  ),
+                  div(title = "Minimum carapace width (mm) at 50% gear selectivity for commercial male harvest.", style = "cursor: help;",
+                    numericInput("ctrl_fish_size", "Legal Male Size (mm)", 95.0, min = 70.0, max = 120.0, step = 1.0)
+                  ),
+                  div(style = "font-size: 12px; font-weight: 700; color: #1e3a8a; border-bottom: 2px solid #cbd5e1; padding-bottom: 4px; margin: 10px 0 6px 0;",
+                      "Biological Processes"),
+                  div(title = "Enable Kleiber metabolic maintenance, Holling Type II intake, and mass-conserving ecdysis energetics.", style = "cursor: help;",
+                    checkboxInput("tog_energetics", "Bioenergetics", value = TRUE)
+                  ),
+                  div(title = "Enable elevated mortality and ecdysial inhibition above thermal stress thresholds.", style = "cursor: help;",
+                    checkboxInput("tog_thermal", "Thermal Stress", value = TRUE)
+                  ),
+                  div(title = "Enable size-dependent cannibalism mortality on small benthic juveniles (< 35 mm).", style = "cursor: help;",
+                    checkboxInput("tog_cannibalism", "Cannibalism", value = FALSE)
+                  ),
+                  div(title = "Enable exponential post-terminal-molt mortality after 3 years of shell age.", style = "cursor: help;",
+                    checkboxInput("tog_senescence", "Senescence", value = TRUE)
+                  ),
+                  div(title = "Enable directed softmax habitat taxis and localized crowding dispersal.", style = "cursor: help;",
+                    checkboxInput("tog_movement", "Taxis Movement", value = TRUE)
+                  ),
+                  div(title = "Enable annual female egg extrusion and fecundity senescence.", style = "cursor: help;",
+                    checkboxInput("tog_repro", "Reproduction", value = TRUE)
+                  )
+                )
+              )
+            )
           )
         )
       )
@@ -420,41 +515,63 @@ server <- function(input, output, session) {
   # Transport Actions
   observeEvent(input$btn_start, { is_running(TRUE) })
 
-  # Auto-advance simulation while running (timer-driven to avoid reactive loops)
-  auto_timer <- reactiveTimer(200)
+  # Auto-advance simulation while running (timer-driven; isolate prevents self-invalidation)
+  auto_timer <- reactiveTimer(250)
   observe({
     auto_timer()
-    if (is_running()) {
-      tryCatch({
-        d_step <- as.integer(input$step_days)
-        new_day <- current_day() + d_step
-        current_day(new_day)
-        sim <- sim_model()
-        if (!is.null(sim)) {
-          df <- run_crab_simulation(sim, seq(new_day - d_step, new_day, by = 1))
-          sim_history(rbind(sim_history(), df))
-          sim_positions(crab_agent_positions(sim))
-          tick(tick() + 1)
-        }
-        horizon <- as.numeric(input$duration_years) * 365
-        if (new_day >= horizon) {
+    isolate({
+      if (is_running()) {
+        tryCatch({
+          d_step <- as.integer(input$step_days)
+          new_day <- current_day() + d_step
+          current_day(new_day)
+          sim <- sim_model()
+          if (!is.null(sim)) {
+            df <- run_crab_simulation(sim, seq(new_day - d_step, new_day, by = 1))
+            sim_history(rbind(sim_history(), df))
+            sim_positions(crab_agent_positions(sim))
+            tick(tick() + 1)
+          }
+          horizon <- as.numeric(input$duration_years) * 365
+          if (new_day >= horizon) {
+            is_running(FALSE)
+            showNotification("Simulation horizon reached.", type = "message", duration = 6)
+          }
+        }, error = function(e) {
           is_running(FALSE)
-          showNotification("Simulation horizon reached.", type = "message", duration = 6)
-        }
-      }, error = function(e) {
-        is_running(FALSE)
-        showNotification(paste("Simulation error:", conditionMessage(e)), type = "error")
-      })
-    }
+          showNotification(paste("Simulation error:", conditionMessage(e)), type = "error")
+        })
+      }
+    })
   })
   observeEvent(input$btn_pause, { is_running(FALSE) })
   observeEvent(input$btn_stop, {
     is_running(FALSE)
     current_day(0)
+    mpa <- exclusion_box()
     sim <- create_crab_simulation(120, list(
-      benthic_carrying_capacity_density = 6000.0,
-      grid_size = 50,
-      unit_meters = 1000.0
+      benthic_carrying_capacity_density = as.numeric(input$ctrl_capacity %||% 6000.0),
+      local_crowding_box_size = as.integer(input$ctrl_crowding_box %||% 0L),
+      grid_size = as.numeric(input$ctrl_grid %||% 1000),
+      unit_meters = as.numeric(input$ctrl_unit %||% 1.0),
+      depth_opt = as.numeric(input$ctrl_depth_opt %||% 200.0),
+      depth_sigma = as.numeric(input$ctrl_depth_sigma %||% 100.0),
+      temp_pref_min = as.numeric(input$ctrl_temp_pref_min %||% -1.5),
+      temp_pref_opt = as.numeric(input$ctrl_temp_pref_opt %||% 5.0),
+      temp_pref_max = as.numeric(input$ctrl_temp_pref_max %||% 10.0),
+      max_move_m_per_year = as.numeric(input$ctrl_max_move %||% 7300.0),
+      food_availability = as.numeric(input$ctrl_food %||% 1.0),
+      fishing_season_start = as.numeric(input$ctrl_fish_start %||% 90.0),
+      fishing_season_end = as.numeric(input$ctrl_fish_end %||% 150.0),
+      fishing_harvest_rate_annual = as.numeric(input$ctrl_fish_f %||% 0.0),
+      legal_size_male = as.numeric(input$ctrl_fish_size %||% 95.0),
+      use_energetics = isTRUE(input$tog_energetics),
+      use_thermal_stress = isTRUE(input$tog_thermal),
+      use_cannibalism = isTRUE(input$tog_cannibalism),
+      use_senescence = isTRUE(input$tog_senescence),
+      use_movement = isTRUE(input$tog_movement),
+      use_reproduction = isTRUE(input$tog_repro),
+      mpa = mpa
     ))
     sim_model(sim)
     df <- run_crab_simulation(sim, 0:1)
@@ -462,6 +579,20 @@ server <- function(input, output, session) {
     sim_positions(crab_agent_positions(sim))
     current_day(1)
     annual_records(data.frame())
+  })
+  observeEvent(input$btn_rewind, {
+    is_running(FALSE)
+    h <- sim_history()
+    if (nrow(h) > 1) {
+      rw <- as.numeric(input$rewind_days %||% 30)
+      target_t <- max(1, tail(h$times, 1) - rw)
+      keep <- h$times <= target_t
+      if (!any(keep)) keep[1] <- TRUE
+      h_sub <- h[keep, , drop = FALSE]
+      sim_history(h_sub)
+      current_day(tail(h_sub$times, 1))
+      tick(tick() + 1)
+    }
   })
   observeEvent(input$btn_step, {
     d_step <- as.integer(input$step_days)
@@ -485,10 +616,11 @@ server <- function(input, output, session) {
     dur_y <- as.integer(input$duration_years)
     horizon <- dur_y * 365
     running <- is_running()
+    sim_date <- format_sim_date_r(day)
     if (running) {
-      paste0("Simulation running — day ", day, " of ", horizon)
+      paste0("Simulation running — day ", day, " of ", horizon, " (", sim_date, ")")
     } else {
-      paste0("Ready — day ", day, " of ", horizon)
+      paste0("Ready — day ", day, " of ", horizon, " (", sim_date, ")")
     }
   })
 
@@ -507,8 +639,14 @@ server <- function(input, output, session) {
       as.numeric(input$ctrl_temp_mult)
     )
     hsi <- aoi_habitat_suitability(
-      temp_info$mean_temp, depth, as.numeric(input$ctrl_hsi_offset),
-      as.numeric(input$ctrl_hsi_mult)
+      temp_info$mean_temp, depth,
+      offset = as.numeric(input$ctrl_hsi_offset %||% 0.0),
+      mult = as.numeric(input$ctrl_hsi_mult %||% 1.0),
+      temp_pref_min = as.numeric(input$ctrl_temp_pref_min %||% -1.5),
+      temp_pref_opt = as.numeric(input$ctrl_temp_pref_opt %||% 5.0),
+      temp_pref_max = as.numeric(input$ctrl_temp_pref_max %||% 10.0),
+      depth_opt = as.numeric(input$ctrl_depth_opt %||% 200.0),
+      depth_sigma = as.numeric(input$ctrl_depth_sigma %||% 100.0)
     )
     sprintf("Depth: %.0f m | Temp: %.1f°C | HSI: %.3f", depth, temp_info$mean_temp, hsi)
   })
@@ -532,7 +670,7 @@ server <- function(input, output, session) {
         name = "Depth (m)"
       ) +
       geom_point(data = aoi_pt, aes(x = lon, y = lat), color = "#dc2626", size = 4.5, shape = 21, fill = "#ef4444", stroke = 1.5) +
-      scale_x_continuous(limits = c(-67.0, -57.0), expand = c(0, 0)) +
+      scale_x_continuous(limits = c(-66.5, -56.5), expand = c(0, 0)) +
       scale_y_continuous(limits = c(41.5, 48.5), expand = c(0, 0)) +
       labs(x = "Longitude (°W)", y = "Latitude (°N)") +
       theme_minimal() +
@@ -595,16 +733,66 @@ server <- function(input, output, session) {
     state_colors <- c(foraging = "#0ea5e9", resting = "#14b8a6",
                       molting = "#f59e0b", reproducing = "#a855f7")
 
-    mpa <- list(xmin = 0.25, xmax = 0.55, ymin = 0.25, ymax = 0.55)
-    mpa_lon <- c(aoi_lon + (mpa$xmin - 0.5) * span, aoi_lon + (mpa$xmax - 0.5) * span)
-    mpa_lat <- c(aoi_lat + (mpa$ymin - 0.5) * span, aoi_lat + (mpa$ymax - 0.5) * span)
+    mpa <- exclusion_box()
+    shapes_list <- list()
+    if (!is.null(mpa) && isTRUE(mpa$active)) {
+      mpa_lon <- c(aoi_lon + (mpa$xmin - 0.5) * span, aoi_lon + (mpa$xmax - 0.5) * span)
+      mpa_lat <- c(aoi_lat + (mpa$ymin - 0.5) * span, aoi_lat + (mpa$ymax - 0.5) * span)
+      shapes_list <- list(list(
+        type = "rect", xref = "x", yref = "y",
+        x0 = mpa_lon[1], x1 = mpa_lon[2], y0 = mpa_lat[1], y1 = mpa_lat[2],
+        line = list(color = "#16a34a", width = 2, dash = "dash"), fillcolor = "rgba(22, 163, 74, 0.1)"
+      ))
+    }
 
-    p <- plot_ly() %>%
+    layer_choice <- tolower(as.character(input$ctrl_layer %||% "depth"))
+    n_bg <- 90L
+    lon_bg <- seq(aoi_lon - span / 2, aoi_lon + span / 2, length.out = n_bg)
+    lat_bg <- seq(aoi_lat - span / 2, aoi_lat + span / 2, length.out = n_bg)
+    bg_df <- expand.grid(lon = lon_bg, lat = lat_bg)
+    bg_df$depth <- scotian_shelf_depth(bg_df$lon, bg_df$lat)
+    bg_z <- bg_df$depth
+    habitat_colorscale <- list(
+      list(0.00, "#15385E"),
+      list(0.25, "#00A6CA"),
+      list(0.50, "#C1EEF1"),
+      list(0.75, "#FFE14F"),
+      list(1.00, "#FE7958")
+    )
+    t_off <- as.numeric(input$ctrl_temp_offset %||% 0.0)
+    t_mult <- as.numeric(input$ctrl_temp_mult %||% 1.0)
+    doy_now <- (current_day() %% 365) + 1
+    if (grepl("temp", layer_choice)) {
+      bg_z <- vapply(seq_along(bg_df$depth), function(i) {
+        seasonal_bottom_temperature_cycle(doy_now, bg_df$depth[i], bg_df$lat[i], t_off, t_mult)$temps[1]
+      }, numeric(1))
+    } else if (grepl("hsi|habitat|suit", layer_choice)) {
+      t_bg <- vapply(seq_along(bg_df$depth), function(i) {
+        seasonal_bottom_temperature_cycle(doy_now, bg_df$depth[i], bg_df$lat[i], t_off, t_mult)$temps[1]
+      }, numeric(1))
+      bg_z <- vapply(seq_along(bg_df$depth), function(i) {
+        aoi_habitat_suitability(
+          t_bg[i], bg_df$depth[i],
+          offset = as.numeric(input$ctrl_hsi_offset %||% 0.0),
+          mult = as.numeric(input$ctrl_hsi_mult %||% 1.0),
+          temp_pref_min = as.numeric(input$ctrl_temp_pref_min %||% -1.5),
+          temp_pref_opt = as.numeric(input$ctrl_temp_pref_opt %||% 5.0),
+          temp_pref_max = as.numeric(input$ctrl_temp_pref_max %||% 10.0),
+          depth_opt = as.numeric(input$ctrl_depth_opt %||% 200.0),
+          depth_sigma = as.numeric(input$ctrl_depth_sigma %||% 100.0)
+        )
+      }, numeric(1))
+    }
+    bg_df$layer_val <- bg_z
+
+    p <- plot_ly(source = "spatial_map") %>%
       add_heatmap(
-        data = bathy_raster_df,
-        x = ~lon, y = ~lat, z = ~depth,
-        colorscale = "Blues", reversescale = TRUE,
-        showscale = FALSE, opacity = 0.7
+        data = bg_df,
+        x = ~lon, y = ~lat, z = ~layer_val,
+        zsmooth = "best",
+        colorscale = habitat_colorscale,
+        reversescale = !grepl("temp", layer_choice),
+        showscale = TRUE, opacity = 0.85
       )
     if (nrow(living) > 0) {
       p <- p %>%
@@ -618,15 +806,12 @@ server <- function(input, output, session) {
     }
     p <- p %>%
       layout(
+        dragmode = "select",
         xaxis = list(title = "Longitude (°W)",
                      range = c(aoi_lon - span / 2, aoi_lon + span / 2)),
         yaxis = list(title = "Latitude (°N)",
                      range = c(aoi_lat - span / 2, aoi_lat + span / 2)),
-        shapes = list(list(
-          type = "rect", xref = "x", yref = "y",
-          x0 = mpa_lon[1], x1 = mpa_lon[2], y0 = mpa_lat[1], y1 = mpa_lat[2],
-          line = list(color = "#16a34a", width = 2, dash = "dash"), fillcolor = "transparent"
-        )),
+        shapes = shapes_list,
         margin = list(l = 35, r = 15, t = 15, b = 35)
       )
     p
@@ -669,23 +854,52 @@ server <- function(input, output, session) {
     box_df <- bathy_raster_df[in_box & !is.na(bathy_raster_df$depth), ]
     if (nrow(box_df) > 400) box_df <- box_df[sample.int(nrow(box_df), 400), ]
 
-    temp_off <- as.numeric(input$ctrl_temp_offset)
-    temp_mult <- as.numeric(input$ctrl_temp_mult)
-    hsi_off <- as.numeric(input$ctrl_hsi_offset)
-    hsi_mult <- as.numeric(input$ctrl_hsi_mult)
+    temp_off <- as.numeric(input$ctrl_temp_offset %||% 0.0)
+    temp_mult <- as.numeric(input$ctrl_temp_mult %||% 1.0)
+    hsi_off <- as.numeric(input$ctrl_hsi_offset %||% 0.0)
+    hsi_mult <- as.numeric(input$ctrl_hsi_mult %||% 1.0)
+    doy_now <- (current_day() %% 365) + 1
     t_vals <- vapply(box_df$depth, function(d) {
-      seasonal_bottom_temperature_cycle(0, d, aoi_lat, temp_off, temp_mult)$temps[1]
+      seasonal_bottom_temperature_cycle(doy_now, d, aoi_lat, temp_off, temp_mult)$temps[1]
     }, numeric(1))
     h_vals <- vapply(seq_along(box_df$depth), function(k) {
-      aoi_habitat_suitability(t_vals[k], box_df$depth[k], hsi_off, hsi_mult)
+      aoi_habitat_suitability(
+        t_vals[k], box_df$depth[k],
+        offset = hsi_off, mult = hsi_mult,
+        temp_pref_min = as.numeric(input$ctrl_temp_pref_min %||% -1.5),
+        temp_pref_opt = as.numeric(input$ctrl_temp_pref_opt %||% 5.0),
+        temp_pref_max = as.numeric(input$ctrl_temp_pref_max %||% 10.0),
+        depth_opt = as.numeric(input$ctrl_depth_opt %||% 200.0),
+        depth_sigma = as.numeric(input$ctrl_depth_sigma %||% 100.0)
+      )
     }, numeric(1))
 
-    p1 <- plot_ly(x = box_df$depth, type = "histogram", name = "Depth", marker = list(color = "#0284c7")) %>%
-      layout(xaxis = list(title = "Depth (m)"))
-    p2 <- plot_ly(x = t_vals, type = "histogram", name = "Temp", marker = list(color = "#dc2626")) %>%
-      layout(xaxis = list(title = "Temp (°C)"))
-    p3 <- plot_ly(x = h_vals, type = "histogram", name = "HSI", marker = list(color = "#16a34a")) %>%
-      layout(xaxis = list(title = "HSI"))
+    d_min <- min(box_df$depth, na.rm = TRUE)
+    d_max <- max(box_df$depth, na.rm = TRUE)
+    if (d_max <= d_min) d_max <- d_min + 10.0
+    clim_cycle <- seasonal_bottom_temperature_cycle(seq(1, 365, by = 2), mean(box_df$depth, na.rm = TRUE), aoi_lat, temp_off, temp_mult)
+    t_cmin <- min(c(clim_cycle$temps, t_vals), na.rm = TRUE)
+    t_cmax <- max(c(clim_cycle$temps, t_vals), na.rm = TRUE)
+    if (t_cmax <= t_cmin) t_cmax <- t_cmin + 1.0
+
+    p1 <- plot_ly(
+      x = box_df$depth, type = "histogram", name = "Depth",
+      autobinx = FALSE,
+      xbins = list(start = d_min, end = d_max, size = (d_max - d_min) / 24.0),
+      marker = list(color = "#1e3a8a")
+    ) %>% layout(xaxis = list(title = "Depth (m)"))
+    p2 <- plot_ly(
+      x = t_vals, type = "histogram", name = "Temp",
+      autobinx = FALSE,
+      xbins = list(start = t_cmin, end = t_cmax, size = (t_cmax - t_cmin) / 24.0),
+      marker = list(color = "#dc2626")
+    ) %>% layout(xaxis = list(title = "Temp (°C)", range = c(t_cmin, t_cmax)))
+    p3 <- plot_ly(
+      x = h_vals, type = "histogram", name = "HSI",
+      autobinx = FALSE,
+      xbins = list(start = 0.0, end = 1.0, size = 1.0 / 24.0),
+      marker = list(color = "#0f766e")
+    ) %>% layout(xaxis = list(title = "HSI [0, 1]", range = c(0.0, 1.0)))
 
     subplot(p1, p2, p3, nrows = 1, shareY = FALSE, titleX = TRUE) %>%
       layout(showlegend = FALSE, margin = list(l = 35, r = 15, t = 15, b = 35))
@@ -699,14 +913,13 @@ server <- function(input, output, session) {
   stage_labels <- c(paste("Instar", 1:11), "Instar 12+")
   crab_stage_from_cw <- function(cw) as.integer(cut(cw, breaks = c(-Inf, stage_edges, Inf), labels = FALSE))
 
-  stage_click <- event_data("plotly_click", source = "stage_src")
-  observeEvent(stage_click, {
-    cd <- stage_click
+  observeEvent(event_data("plotly_click", source = "stage_src"), {
+    cd <- event_data("plotly_click", source = "stage_src")
     if (is.null(cd) || nrow(cd) == 0L) return()
     idx <- suppressWarnings(as.integer(cd$customdata[1]))
     if (is.na(idx)) return()
     selected_stage(if (!identical(selected_stage(), idx)) idx else NULL)
-  })
+  }, ignoreNULL = TRUE)
 
   output$stage_structure_plot <- renderPlotly({
     tick()
@@ -724,10 +937,10 @@ server <- function(input, output, session) {
     offset <- 0.2
     sel <- selected_stage()
 
-    male_color <- ifelse(x_pos == sel, "#f59e0b", "#0284c7")
-    female_color <- ifelse(x_pos == sel, "#f59e0b", "#dc2626")
+    male_color <- if (is.null(sel)) rep("#0284c7", length(x_pos)) else ifelse(x_pos == sel, "#f59e0b", "#0284c7")
+    female_color <- if (is.null(sel)) rep("#dc2626", length(x_pos)) else ifelse(x_pos == sel, "#f59e0b", "#dc2626")
 
-    p <- plot_ly() %>%
+    p <- plot_ly(source = "stage_src") %>%
       add_segments(x = x_pos - offset, xend = x_pos - offset, y = 0, yend = male_counts,
                    line = list(color = male_color, width = 2), name = "Males", showlegend = FALSE) %>%
       add_markers(x = x_pos - offset, y = male_counts, customdata = x_pos,
@@ -738,7 +951,7 @@ server <- function(input, output, session) {
       add_markers(x = x_pos + offset, y = female_counts, customdata = x_pos,
                   marker = list(color = female_color, size = 8, line = list(width = 0.5, color = "#ffffff")),
                   name = "Females") %>%
-      event_register("plotly_click", source = "stage_src") %>%
+      event_register("plotly_click") %>%
       layout(
         xaxis = list(tickvals = x_pos, ticktext = stage_labels, tickangle = -45),
         yaxis = list(title = "Abundance"),
@@ -753,37 +966,71 @@ server <- function(input, output, session) {
   })
 
   output$maturity_ogive_plot <- renderPlotly({
+    tick()
     sizes <- seq(10, 150, by = 2)
     prob_m <- compute_maturity_probability(sizes, "M", 4.0)
     prob_f <- compute_maturity_probability(sizes, "F", 4.0)
-    plot_ly() %>%
-      add_lines(x = sizes, y = prob_m, line = list(color = "#1d4ed8", width = 2), name = "Male (L50=91.8mm)") %>%
-      add_lines(x = sizes, y = prob_f, line = list(color = "#dc2626", width = 2), name = "Female (L50=51.6mm)") %>%
-      layout(
-        xaxis = list(title = "Carapace Width (mm)"),
-        yaxis = list(title = "Maturity Probability", range = c(0, 1.05)),
-        margin = list(l = 45, r = 15, t = 15, b = 35)
-      )
+    sel_curve <- compute_selectivity(sizes, s50 = as.numeric(input$ctrl_fish_size %||% 95.0), sigma = 5.0)
+    p <- plot_ly() %>%
+      add_lines(x = sizes, y = prob_m, line = list(color = "#1d4ed8", width = 2), name = "Male Theory (L50=91.8mm)") %>%
+      add_lines(x = sizes, y = prob_f, line = list(color = "#dc2626", width = 2), name = "Female Theory (L50=51.6mm)") %>%
+      add_lines(x = sizes, y = sel_curve, line = list(color = "#16a34a", width = 1.8, dash = "dash"), name = "Gear Selectivity")
+    pos <- sim_positions()
+    living <- pos[!pos$state %in% c("dead", "harvested"), , drop = FALSE]
+    if (nrow(living) > 3) {
+      m_sub <- living[living$sex == "M", , drop = FALSE]
+      if (nrow(m_sub) > 2) {
+        emp_m <- compute_empirical_ogive_r(m_sub$size, m_sub$mature == "1", bin_width = 10.0)
+        if (nrow(emp_m) > 0) {
+          p <- p %>% add_markers(x = emp_m$size, y = emp_m$prop,
+                                 marker = list(color = "#0284c7", size = 7, symbol = "diamond"),
+                                 name = "Empirical Male Maturity")
+        }
+      }
+      f_sub <- living[living$sex == "F", , drop = FALSE]
+      if (nrow(f_sub) > 2) {
+        emp_f <- compute_empirical_ogive_r(f_sub$size, f_sub$mature == "1", bin_width = 10.0)
+        if (nrow(emp_f) > 0) {
+          p <- p %>% add_markers(x = emp_f$size, y = emp_f$prop,
+                                 marker = list(color = "#e11d48", size = 7, symbol = "diamond"),
+                                 name = "Empirical Female Maturity")
+        }
+      }
+    }
+    p %>% layout(
+      xaxis = list(title = "Carapace Width (mm)"),
+      yaxis = list(title = "Probability", range = c(0, 1.05)),
+      margin = list(l = 45, r = 15, t = 15, b = 35)
+    )
   })
 
   output$size_frequency_plot <- renderPlotly({
     tick()
     pos <- sim_positions()
-    if (nrow(pos) == 0) {
+    living <- pos[!pos$state %in% c("dead", "harvested"), , drop = FALSE]
+    if (nrow(living) == 0) {
       plot_ly() %>% layout(title = "No agents yet — run the simulation")
     } else {
+      n_tot <- max(1, nrow(living))
+      s_im_m <- living$size[living$sex == "M" & living$mature != "1"]
+      s_ma_m <- living$size[living$sex == "M" & living$mature == "1"]
+      s_im_f <- living$size[living$sex == "F" & living$mature != "1"]
+      s_ma_f <- living$size[living$sex == "F" & living$mature == "1"]
+      km_imm <- kde_density_r(s_im_m); km_imm$y <- km_imm$y * (length(s_im_m) / n_tot)
+      km_mat <- kde_density_r(s_ma_m); km_mat$y <- km_mat$y * (length(s_ma_m) / n_tot)
+      kf_imm <- kde_density_r(s_im_f); kf_imm$y <- kf_imm$y * (length(s_im_f) / n_tot)
+      kf_mat <- kde_density_r(s_ma_f); kf_mat$y <- kf_mat$y * (length(s_ma_f) / n_tot)
       plot_ly() %>%
-        add_histogram(data = pos[pos$sex == "M", ], x = ~size, name = "Males",
-                      marker = list(color = "rgba(29, 78, 216, 0.7)")) %>%
-        add_histogram(data = pos[pos$sex == "F", ], x = ~size, name = "Females",
-                      marker = list(color = "rgba(220, 38, 38, 0.7)")) %>%
+        add_lines(x = km_imm$x, y = km_imm$y, line = list(color = "#38bdf8", width = 2), name = "Immature Male") %>%
+        add_lines(x = km_mat$x, y = km_mat$y, line = list(color = "#1d4ed8", width = 2.2), name = "Mature Male") %>%
+        add_lines(x = kf_imm$x, y = kf_imm$y, line = list(color = "#fb923c", width = 2), name = "Immature Female") %>%
+        add_lines(x = kf_mat$x, y = kf_mat$y, line = list(color = "#dc2626", width = 2.2), name = "Mature Female") %>%
         layout(
-          barmode = "overlay",
           xaxis = list(title = "Carapace Width (mm)", range = c(0, 165)),
-          yaxis = list(title = "Count"),
+          yaxis = list(title = "KDE Density"),
           shapes = list(
-            list(type = "line", x0 = 95, x1 = 95, y0 = 0, y1 = 1, yref = "paper",
-                 line = list(color = "#16a34a", width = 2, dash = "dash"))
+            list(type = "line", x0 = as.numeric(input$ctrl_fish_size %||% 95), x1 = as.numeric(input$ctrl_fish_size %||% 95),
+                 y0 = 0, y1 = 1, yref = "paper", line = list(color = "#16a34a", width = 2, dash = "dash"))
           ),
           margin = list(l = 45, r = 15, t = 15, b = 35)
         )
@@ -809,28 +1056,32 @@ server <- function(input, output, session) {
   output$stock_recruitment_plot <- renderPlotly({
     h <- sim_history()
     tick()
-    if (nrow(h) < 2) {
-      plot_ly() %>% layout(title = "No history available")
+    if (nrow(h) < 4) {
+      plot_ly() %>% layout(title = "Run >= 4 steps to populate Stock-Recruitment")
     } else {
-      plot_ly(data = h, x = ~times) %>%
-        add_lines(y = ~mature_female, line = list(color = "#dc2626", width = 2),
-                  name = "Spawning stock (mature females)") %>%
-        add_lines(y = ~mature_male, line = list(color = "#1d4ed8", width = 1.5, dash = "dash"),
-                  name = "Mature males") %>%
-        layout(
-          xaxis = list(title = "Simulation Day"),
-          yaxis = list(title = "Abundance"),
-          annotations = list(list(
-            text = "Recruitment not modelled (closed cohort)",
-            xref = "paper", yref = "paper", x = 0.02, y = 0.95,
-            showarrow = FALSE, font = list(size = 11, color = "#64748b")
-          )),
-          margin = list(l = 45, r = 15, t = 15, b = 35)
-        )
+      sp <- pmax(1, h$mature_female[-nrow(h)])
+      rec <- pmax(1, (h$foraging + h$resting + h$molting + h$reproducing - h$mature_female - h$mature_male)[-1])
+      sr <- fit_stock_recruitment_r(sp, rec)
+      p <- plot_ly() %>%
+        add_markers(x = sp, y = rec, marker = list(color = "#1d4ed8", size = 7), name = "Observed")
+      if (isTRUE(sr$isFitted)) {
+        sg <- seq(min(sp), max(sp), length.out = 60)
+        bh <- (sr$beverton_holt$alpha * sg) / (1 + sr$beverton_holt$beta * sg)
+        rk <- sr$ricker$alpha * sg * exp(-sr$ricker$beta * sg)
+        p <- p %>%
+          add_lines(x = sg, y = bh, line = list(color = "#16a34a", width = 2), name = sprintf("Beverton-Holt (R2=%.2f)", sr$beverton_holt$r2)) %>%
+          add_lines(x = sg, y = rk, line = list(color = "#f59e0b", width = 2, dash = "dash"), name = sprintf("Ricker (R2=%.2f)", sr$ricker$r2))
+      }
+      p %>% layout(
+        xaxis = list(title = "Spawning Stock (Mature Females)"),
+        yaxis = list(title = "Recruits / Juveniles"),
+        margin = list(l = 45, r = 15, t = 15, b = 35)
+      )
     }
   })
 
   output$macro_fits_plot <- renderPlotly({
+    input$btn_refit_macro
     h <- sim_history()
     tick()
     if (nrow(h) < 2) {
@@ -844,16 +1095,25 @@ server <- function(input, output, session) {
       annual <- do.call(rbind, lapply(split(h, h$year), function(g) {
         g[nrow(g), , drop = FALSE]
       }))
-      plot_ly(data = annual, x = ~year) %>%
-        add_lines(y = ~(foraging + resting + molting + reproducing) * mean_mass,
-                  line = list(color = "#1d4ed8", width = 2), name = "Survey biomass (kg)") %>%
-        add_bars(y = ~harvested * mean_mass, marker = list(color = "rgba(220, 38, 38, 0.6)"),
-                 name = "Catch (kg)") %>%
-        layout(
-          xaxis = list(title = "Year", tickvals = annual$year, tickformat = "d"),
-          yaxis = list(title = "Mass (kg)"),
-          margin = list(l = 45, r = 15, t = 15, b = 35)
-        )
+      bio <- (annual$foraging + annual$resting + annual$molting + annual$reproducing) * mean_mass
+      cat_kg <- annual$harvested * mean_mass
+      p <- plot_ly(x = annual$year) %>%
+        add_lines(y = bio, line = list(color = "#1d4ed8", width = 2), name = "Survey biomass (kg)") %>%
+        add_bars(y = cat_kg, marker = list(color = "rgba(220, 38, 38, 0.5)"), name = "Catch (kg)")
+      if (length(bio) >= 4) {
+        sch <- fit_schaefer_r(bio, cat_kg)
+        dd <- fit_delay_difference_r(bio, cat_kg)
+        p <- p %>%
+          add_lines(y = sch$predicted, line = list(color = "#16a34a", width = 2, dash = "dash"),
+                    name = sprintf("Schaefer (R2=%.2f)", sch$R2)) %>%
+          add_lines(y = dd$predicted, line = list(color = "#9333ea", width = 2, dash = "dot"),
+                    name = sprintf("Delay-Diff (R2=%.2f)", dd$R2))
+      }
+      p %>% layout(
+        xaxis = list(title = "Year", tickvals = annual$year, tickformat = "d"),
+        yaxis = list(title = "Mass (kg)"),
+        margin = list(l = 45, r = 15, t = 15, b = 35)
+      )
     }
   })
 
@@ -863,19 +1123,24 @@ server <- function(input, output, session) {
     if (nrow(h) < 2) {
       df <- data.frame(Year = character(0), End_Day = numeric(0), Alive = integer(0),
                        Harvested = integer(0), Mature_Females = integer(0),
-                       Legal_Males = integer(0), Exploit_Rate = character(0))
+                       Legal_Males = integer(0), Harvest_Rate = character(0))
     } else {
       h$year <- ceiling(h$times / 365)
-      rows <- lapply(split(h, h$year), function(g) {
+      sp_list <- split(h, h$year)
+      prev_cum_harv <- 0L
+      rows <- lapply(sp_list, function(g) {
         last <- g[nrow(g), ]
         alive <- last$foraging + last$resting + last$molting + last$reproducing
-        exploited <- if (alive + last$harvested > 0) {
-          sprintf("%.1f%%", 100 * last$harvested / (alive + last$harvested))
+        ann_harv <- max(0L, as.integer(last$harvested) - prev_cum_harv)
+        prev_cum_harv <<- as.integer(last$harvested)
+        avail_legal <- last$legal_male + ann_harv
+        harvest_rate <- if (avail_legal > 0) {
+          sprintf("%.1f%%", 100 * ann_harv / avail_legal)
         } else "0.0%"
         data.frame(Year = paste("Year", last$year), End_Day = last$times,
                    Alive = alive, Harvested = last$harvested,
                    Mature_Females = last$mature_female, Legal_Males = last$legal_male,
-                   Exploit_Rate = exploited)
+                   Harvest_Rate = harvest_rate)
       })
       df <- do.call(rbind, rows)
     }

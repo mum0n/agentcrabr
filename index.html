@@ -1240,13 +1240,32 @@ function renderTab3() {
   const counts = curH ? curH.stageCounts : new Array(20).fill(0);
   const alive = model.agents.filter(a => a.isAlive);
 
-  // Stage Structure Bar Chart
-  const stageData = [{
-    type: 'bar',
-    x: STAGE_LABELS,
-    y: counts,
-    marker: { color: '#0284c7' }
-  }];
+  // Stage Structure Lollipop Chart (no connecting lines across stages)
+  const stemX = [];
+  const stemY = [];
+  for (let i = 0; i < STAGE_LABELS.length; i++) {
+    stemX.push(STAGE_LABELS[i], STAGE_LABELS[i], null);
+    stemY.push(0, counts[i], null);
+  }
+  const stageData = [
+    {
+      type: 'scatter',
+      mode: 'lines',
+      x: stemX,
+      y: stemY,
+      line: { color: '#0284c7', width: 2.2 },
+      showlegend: false,
+      hoverinfo: 'skip'
+    },
+    {
+      type: 'scatter',
+      mode: 'markers',
+      x: STAGE_LABELS,
+      y: counts,
+      marker: { color: '#0284c7', size: 8, line: { color: '#ffffff', width: 1 } },
+      name: 'Abundance'
+    }
+  ];
   const stageLayout = {
     margin: { l: 45, r: 15, t: 15, b: 85 },
     xaxis: { tickangle: -45, gridcolor: '#f1f5f9' },
